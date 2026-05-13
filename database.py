@@ -23,16 +23,33 @@ def init_db():
                 duration        REAL DEFAULT 0,
                 width           INTEGER DEFAULT 0,
                 height          INTEGER DEFAULT 0,
+                output_factor   REAL DEFAULT 1.0,
+                target_width    INTEGER DEFAULT 0,
+                target_height   INTEGER DEFAULT 0,
                 status          TEXT DEFAULT 'queued',
                 stage           TEXT DEFAULT 'En cola',
                 progress        REAL DEFAULT 0,
                 eta             INTEGER,
+                elapsed_time    REAL DEFAULT 0,
                 error_msg       TEXT,
                 created_at      REAL,
                 started_at      REAL,
                 completed_at    REAL
             )
         ''')
+
+        # Lightweight migration for existing DBs created before newer columns existed.
+        cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()
+        }
+        if 'elapsed_time' not in cols:
+            conn.execute('ALTER TABLE jobs ADD COLUMN elapsed_time REAL DEFAULT 0')
+        if 'output_factor' not in cols:
+            conn.execute('ALTER TABLE jobs ADD COLUMN output_factor REAL DEFAULT 1.0')
+        if 'target_width' not in cols:
+            conn.execute('ALTER TABLE jobs ADD COLUMN target_width INTEGER DEFAULT 0')
+        if 'target_height' not in cols:
+            conn.execute('ALTER TABLE jobs ADD COLUMN target_height INTEGER DEFAULT 0')
         conn.commit()
 
 
@@ -66,7 +83,9 @@ def create_job(data: dict):
     keys = [
         'id', 'original_name', 'filepath', 'scale', 'model',
         'start_frame', 'end_frame', 'total_frames', 'fps', 'duration',
-        'width', 'height', 'status', 'stage', 'progress', 'created_at',
+        'width', 'height',
+        'output_factor', 'target_width', 'target_height',
+        'status', 'stage', 'progress', 'created_at',
     ]
     vals = [data.get(k) for k in keys]
     placeholders = ', '.join('?' * len(keys))

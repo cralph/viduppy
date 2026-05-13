@@ -92,6 +92,10 @@ button{font-family:var(--sans)}
 .model-btn.active{border-color:var(--accent);background:rgba(124,111,255,.1)}
 .model-btn .mn{font-size:12px;font-weight:500;color:var(--text)}
 .model-btn .md{font-size:11px;color:var(--text3);margin-top:1px}
+.resize-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.mini-input{width:100%;background:var(--bg4);border:1px solid var(--border);border-radius:6px;padding:7px 8px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none}
+.mini-input:focus{border-color:var(--accent)}
+.mini-input::placeholder{color:var(--text3)}
 
 /* Submit */
 .submit-btn{width:100%;margin-top:18px;background:linear-gradient(135deg,var(--accent),var(--teal2));border:none;border-radius:9px;padding:13px;font-size:14px;font-weight:600;color:#fff;cursor:pointer;transition:all .2s;letter-spacing:.3px}
@@ -330,6 +334,29 @@ button{font-family:var(--sans)}
 
         <div style="margin-top:14px;background:var(--bg3);border:1px solid var(--border);border-radius:9px;padding:10px 14px;font-size:12px;color:var(--text2)" id="outputEstimate">
           Output resolution: <strong id="outRes">—</strong>
+          <span style="margin-left:8px;color:var(--text3)">·</span>
+          <span style="margin-left:8px;color:var(--text3)">Clip: <strong id="clipDur">—</strong></span>
+        </div>
+
+        <div class="control-group" style="margin-top:10px">
+          <label>Final resize (opcional, aplicado en FFmpeg después de Upscayl)</label>
+          <div class="resize-grid">
+            <div>
+              <div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:6px">Factor final</div>
+              <input class="mini-input" id="outFactorInp" type="number" min="0.1" step="0.1" value="1.0" placeholder="1.0">
+            </div>
+            <div>
+              <div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:6px">Ancho objetivo</div>
+              <input class="mini-input" id="outWidthInp" type="number" min="2" step="2" placeholder="Ej: 1920">
+            </div>
+            <div>
+              <div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:6px">Alto objetivo</div>
+              <input class="mini-input" id="outHeightInp" type="number" min="2" step="2" placeholder="Ej: 1080">
+            </div>
+          </div>
+          <div style="font-size:11px;color:var(--text3);margin-top:8px">
+            Regla: si defines ancho/alto, tienen prioridad sobre factor. Puedes usar solo uno para conservar proporción.
+          </div>
         </div>
 
         <button class="submit-btn" id="submitBtn" onclick="submitJob()">
@@ -492,13 +519,16 @@ button{font-family:var(--sans)}
 // ── State ─────────────────────────────────────────────────────────────────────
 let videoData    = null;
 let selectedScale = 2;
-let selectedModel = 'realesrgan-x4plus';
+let selectedModel = null;
 let models        = [];
 let allJobs       = [];
 let currentFilter = 'all';
 let rangeStartPct = 0;
 let rangeEndPct   = 1;
 let outputJobId   = null;
+let outputFactor  = 1.0;
+let targetWidth   = 0;
+let targetHeight  = 0;
 
 // ── Clock ─────────────────────────────────────────────────────────────────────
 setInterval(() => {
@@ -528,10 +558,22 @@ async function loadModels() {
   try {
     const r = await fetch('/api/models');
     const d = await r.json();
-    models = d.models;
+    models = Array.isArray(d.models) ? d.models : [];
+    if (!models.length) {
+      document.getElementById('modelGrid').innerHTML =
+        `<div style="font-size:12px;color:var(--red)">No hay modelos instalados detectados.</div>`;
+      selectedModel = null;
+      return;
+    }
+
+    // Keep current selection only if it's still installed; otherwise pick first detected model.
+    if (!selectedModel || !models.some(m => m.id === selectedModel)) {
+      selectedModel = models[0].id;
+    }
+
     const grid = document.getElementById('modelGrid');
-    grid.innerHTML = models.map((m, i) => `
-      <div class="model-btn ${i === 0 ? 'active' : ''}" data-model="${m.id}" onclick="selectModel('${m.id}',this)">
+    grid.innerHTML = models.map((m) => `
+      <div class="model-btn ${m.id === selectedModel ? 'active' : ''}" data-model="${m.id}" onclick="selectModel('${m.id}',this)">
         <div class="mn">${m.name}</div>
         <div class="md">${m.desc || ''}</div>
       </div>`).join('');
@@ -541,7 +583,7 @@ loadModels();
 
 function selectScale(s) {
   selectedScale = s;
-  document.querySelectorAll('.scale-btn').forEach(b =>
+  document.querySelectorAll('#scaleGrid .scale-btn').forEach(b =>
     b.classList.toggle('active', parseInt(b.dataset.scale) === s));
   updateOutputEstimate();
 }
@@ -682,24 +724,58 @@ function selectPct(pct)  { rangeStartPct = 0; rangeEndPct = pct/100; updateTimel
 
 function updateOutputEstimate() {
   if (!videoData) return;
-  const w = (videoData.width  || 0) * selectedScale;
-  const h = (videoData.height || 0) * selectedScale;
+  outputFactor = parseFloat(document.getElementById('outFactorInp')?.value || '1.0');
+  if (!Number.isFinite(outputFactor) || outputFactor <= 0) outputFactor = 1.0;
+
+  targetWidth = parseInt(document.getElementById('outWidthInp')?.value || '0', 10) || 0;
+  targetHeight = parseInt(document.getElementById('outHeightInp')?.value || '0', 10) || 0;
+
+  const baseW = (videoData.width  || 0) * selectedScale;
+  const baseH = (videoData.height || 0) * selectedScale;
+  let w = baseW;
+  let h = baseH;
+
+  if (targetWidth > 0 && targetHeight > 0) {
+    w = targetWidth;
+    h = targetHeight;
+  } else if (targetWidth > 0) {
+    w = targetWidth;
+    h = Math.max(2, Math.round((baseH * targetWidth) / Math.max(baseW, 1) / 2) * 2);
+  } else if (targetHeight > 0) {
+    h = targetHeight;
+    w = Math.max(2, Math.round((baseW * targetHeight) / Math.max(baseH, 1) / 2) * 2);
+  } else if (Math.abs(outputFactor - 1.0) > 1e-6) {
+    w = Math.max(2, Math.round(baseW * outputFactor / 2) * 2);
+    h = Math.max(2, Math.round(baseH * outputFactor / 2) * 2);
+  }
+
+  const fStart = Math.floor(rangeStartPct * videoData.total_frames);
+  const fEnd   = Math.round(rangeEndPct * videoData.total_frames);
+  const clipSec = Math.max(0, (fEnd - fStart) / Math.max(videoData.fps || 0, 1));
   document.getElementById('outRes').textContent = w && h ? `${w} × ${h} px` : '—';
+  document.getElementById('clipDur').textContent = fmtClock(clipSec);
 }
 
 function resetUpload() {
   videoData = null;
+  outputFactor = 1.0;
+  targetWidth = 0;
+  targetHeight = 0;
   document.getElementById('uploadSection').style.display     = 'block';
   document.getElementById('videoPreviewWrap').style.display   = 'none';
   document.getElementById('uploadProgress').style.display     = 'none';
   document.getElementById('mainVideo').src = '';
   document.getElementById('uploadBar').style.width = '0%';
+  document.getElementById('outFactorInp').value = '1.0';
+  document.getElementById('outWidthInp').value = '';
+  document.getElementById('outHeightInp').value = '';
   fileInput.value = '';
 }
 
 // ── Submit job ────────────────────────────────────────────────────────────────
 async function submitJob() {
   if (!videoData) return;
+  if (!selectedModel) { toast('No hay modelo instalado seleccionado', 'error'); return; }
   const fStart = Math.floor(rangeStartPct * videoData.total_frames);
   const fEnd   = Math.round(rangeEndPct   * videoData.total_frames);
   if (fEnd - fStart < 2) { toast('Select at least 2 frames', 'error'); return; }
@@ -716,6 +792,9 @@ async function submitJob() {
         filename:     videoData.filename,
         filepath:     videoData.filepath,
         scale:        selectedScale,
+        output_factor: outputFactor,
+        target_width:  targetWidth,
+        target_height: targetHeight,
         model:        selectedModel,
         start_frame:  fStart,
         end_frame:    fEnd,
@@ -830,6 +909,15 @@ function renderJobCard(job) {
   const frameRange = job.start_frame != null
     ? `${fmtFrames(job.start_frame)}→${fmtFrames(job.end_frame)}`
     : 'all frames';
+  const clipSec = (job.start_frame != null && job.end_frame != null && (job.fps || 0) > 0)
+    ? Math.max(0, (job.end_frame - job.start_frame) / job.fps)
+    : 0;
+  const videoDur = parseFloat(job.duration || 0);
+  const outputHint = job.target_width > 0 || job.target_height > 0
+    ? `${job.target_width || '?'}×${job.target_height || '?'}`
+    : (Math.abs((parseFloat(job.output_factor || 1) || 1) - 1) > 1e-6
+      ? `f×${(parseFloat(job.output_factor || 1) || 1).toFixed(2)}`
+      : 'native');
   const createdStr = job.created_at
     ? new Date(job.created_at * 1000).toLocaleString() : '';
 
@@ -871,6 +959,16 @@ function renderJobCard(job) {
 
   const errorHtml = job.status === 'error'
     ? `<div style="font-size:11px;color:var(--red);margin-top:6px;font-family:var(--mono)">⚠ ${job.error_msg||'Unknown error'}</div>` : '';
+  const completedFrames = Math.max(0,
+    parseInt(job.frames_to_process || 0, 10) ||
+    ((job.end_frame != null && job.start_frame != null) ? (job.end_frame - job.start_frame) : 0)
+  );
+  const completedInfo = job.status === 'completed' ? `
+    <div style="margin-top:8px;padding:8px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;font-family:var(--mono);font-size:11px;color:var(--text2);display:flex;gap:14px;flex-wrap:wrap">
+      <span>frames ${fmtFrames(completedFrames)}</span>
+      <span>tiempo ${fmtElapsed(elapsed)}</span>
+    </div>
+  ` : '';
 
   return `
   <div class="job-card ${job.status}" id="jc-${job.id}">
@@ -883,6 +981,8 @@ function renderJobCard(job) {
         <div class="job-meta">
           <span>×${job.scale}</span><span>${job.model}</span>
           <span>${frameRange}</span><span>${job.width||'?'}×${job.height||'?'}</span>
+          <span>clip ${fmtClock(clipSec)}</span><span>video ${fmtClock(videoDur)}</span>
+          <span>out ${outputHint}</span>
         </div>
       </div>
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px">
@@ -890,7 +990,7 @@ function renderJobCard(job) {
         <div class="job-actions">${actions.join('')}</div>
       </div>
     </div>
-    ${progressHtml}${errorHtml}
+    ${progressHtml}${completedInfo}${errorHtml}
     <div style="font-size:10px;color:var(--text3);margin-top:7px;font-family:var(--mono)">${createdStr}</div>
   </div>`;
 }
@@ -1066,6 +1166,15 @@ function fmtTime(sec) {
   const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
   return `${m}:${s.toString().padStart(2,'0')}`;
 }
+function fmtClock(sec) {
+  sec = Number(sec || 0);
+  const s = Math.max(0, Math.floor(sec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  if (h > 0) return `${h}:${m.toString().padStart(2,'0')}:${ss.toString().padStart(2,'0')}`;
+  return `${m}:${ss.toString().padStart(2,'0')}`;
+}
 function fmtETA(sec) {
   if (!sec || sec <= 0) return '';
   if (sec < 60)  return `~${Math.round(sec)}s`;
@@ -1074,11 +1183,20 @@ function fmtETA(sec) {
 }
 function fmtFrames(n) { return (n ?? '?').toLocaleString(); }
 
+document.getElementById('outFactorInp').addEventListener('input', updateOutputEstimate);
+document.getElementById('outWidthInp').addEventListener('input', updateOutputEstimate);
+document.getElementById('outHeightInp').addEventListener('input', updateOutputEstimate);
+
 /** Returns total elapsed seconds for a job, including any accumulated before pauses. */
 function getElapsed(job) {
   const base = parseFloat(job.elapsed_time || 0);
   if (job.status === 'processing' && job.started_at) {
     return base + (Date.now() / 1000 - parseFloat(job.started_at));
+  }
+  if (base <= 0 && job.status === 'completed' && job.completed_at) {
+    const s = parseFloat(job.started_at || 0) || parseFloat(job.created_at || 0);
+    const c = parseFloat(job.completed_at || 0);
+    if (s > 0 && c > s) return c - s;
   }
   return base;
 }

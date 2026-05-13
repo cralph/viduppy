@@ -53,19 +53,52 @@ class VideoProcessor:
         # Per-job log file for debugging
         log_path = os.path.join(config.OUTPUT_FOLDER, f'{job_id}.log')
 
-        update_job(job_id, {'status': 'processing', 'started_at': time.time()})
+        process_started_at = time.time()
+        base_elapsed = float(job.get('elapsed_time', 0) or 0)
+        update_job(job_id, {'status': 'processing', 'started_at': process_started_at})
 
+        keep_workdirs = False
         try:
             self._extract_frames(job_id, job, frames_dir, log_path)
             if self.queue.should_stop():
+                keep_workdirs = not self.queue.is_cancelled(job_id)
                 return
-            self._upscale_frames(job_id, job, frames_dir, upscaled_dir, log_path)
-            if self.queue.should_stop():
-                return
-            self._assemble_video(job_id, job, upscaled_dir, log_path)
+            use_upscayl = self._should_use_upscayl(job)
+            source_dir = frames_dir
+            if use_upscayl:
+                self._upscale_frames(job_id, job, frames_dir, upscaled_dir, log_path)
+                if self.queue.should_stop():
+                    keep_workdirs = not self.queue.is_cancelled(job_id)
+                    return
+                source_dir = upscaled_dir
+            else:
+                out_w, out_h = self._desired_output_size(job)
+                self._log(
+                    log_path,
+                    f'Skipping upscayl: downsize/same-size target ({out_w}x{out_h}) '
+                    f'<= source ({job.get("width", 0)}x{job.get("height", 0)}).'
+                )
+                update_job(job_id, {
+                    'stage': 'Redimensionando con FFmpeg (sin Upscayl)…',
+                    'progress': 85,
+                    'eta': 0,
+                })
+            self._assemble_video(
+                job_id,
+                job,
+                source_dir,
+                log_path,
+                used_upscayl=use_upscayl,
+                process_started_at=process_started_at,
+                base_elapsed=base_elapsed,
+            )
         finally:
-            shutil.rmtree(frames_dir,   ignore_errors=True)
-            shutil.rmtree(upscaled_dir, ignore_errors=True)
+            # Keep temporary dirs when paused so resume can continue from checkpoints.
+            if keep_workdirs:
+                self._log(log_path, 'Paused: keeping frames/upscaled dirs for resume.')
+            else:
+                shutil.rmtree(frames_dir,   ignore_errors=True)
+                shutil.rmtree(upscaled_dir, ignore_errors=True)
 
     # ── Step 1 – Extract frames ───────────────────────────────────────────────
 
@@ -76,6 +109,20 @@ class VideoProcessor:
         start_time  = start_frame / fps
         duration    = (end_frame - start_frame) / fps
         total_exp   = end_frame - start_frame
+        existing    = self._count_pngs(frames_dir)
+
+        if existing >= total_exp > 0:
+            self._log(
+                log_path,
+                f'Extraction skipped: reusing {existing} existing frames (expected {total_exp}).'
+            )
+            update_job(job_id, {
+                'stage': 'Reusando frames extraídos',
+                'progress': 12,
+                'frames_extracted': existing,
+                'frames_to_process': existing,
+            })
+            return
 
         update_job(job_id, {
             'stage':    'Extrayendo frames',
@@ -148,6 +195,12 @@ class VideoProcessor:
             raise RuntimeError('upscayl-bin no encontrado. Configura la ruta en Configuración.')
         if not config.UPSCAYL_MODELS_DIR:
             raise RuntimeError('Directorio de modelos no encontrado. Configura la ruta en Configuración.')
+        if not self._model_is_installed(job['model']):
+            installed = ', '.join(self._list_installed_models()[:12]) or '(ninguno)'
+            raise RuntimeError(
+                f'El modelo "{job["model"]}" no está instalado en {config.UPSCAYL_MODELS_DIR}. '
+                f'Modelos detectados: {installed}'
+            )
 
         self._log(log_path, f'\n=== UPSCALE FRAMES ({total} frames) ===')
         self._log(log_path, f'binary={config.UPSCAYL_BIN}')
@@ -223,50 +276,60 @@ class VideoProcessor:
                 def _run_upscayl(extra_flags: list, label: str):
                     full_cmd = cmd + extra_flags
                     self._log(log_path, f'CMD [{label}]: ' + ' '.join(full_cmd))
+                    upscayl_log = os.path.join(
+                        config.OUTPUT_FOLDER, f'{job_id}_upscayl_{label}.log'
+                    )
+                    log_f = open(upscayl_log, 'a', encoding='utf-8', errors='replace')
                     p = subprocess.Popen(
                         full_cmd,
-                        stdout=subprocess.PIPE,
+                        stdout=log_f,
                         stderr=subprocess.STDOUT,
                         text=True,
-                        bufsize=1,
                     )
-                    # EMA (exponential moving average) for smooth ETA.
-                    # We track seconds-per-percent-point and smooth with alpha=0.2.
-                    _ema_spp  = None   # seconds per % point, EMA
-                    _last_pct = 0.0
-                    _last_t   = time.time()
-                    EMA_ALPHA = 0.2
+                    # ETA based on real frames processed:
+                    # eta = (elapsed / processed) * remaining
+                    _start_t = time.time()
+                    _start_done = min(total, self._count_pngs(upscaled_dir))
+                    _last_done = -1
 
-                    for line in p.stdout:
-                        if self.queue.should_stop():
-                            p.terminate()
-                            return p
-                        line = line.rstrip()
-                        if line:
-                            self._log(log_path, f'  [upscayl/{label}] {line}')
-                        pct_m = _re.search(r'(\d+(?:\.\d+)?)\s*%', line)
-                        if pct_m:
-                            pct = float(pct_m.group(1))
-                            now = time.time()
+                    def _update_from_counts(force: bool = False):
+                        nonlocal _last_done
+                        done = min(total, self._count_pngs(upscaled_dir))
+                        pct  = (done / max(total, 1)) * 100
+                        now  = time.time()
 
-                            # Update EMA speed estimate
-                            dpct = pct - _last_pct
-                            dt   = now - _last_t
-                            if dpct > 0 and dt > 0:
-                                spp = dt / dpct   # seconds per % point
-                                _ema_spp = (spp if _ema_spp is None
-                                            else EMA_ALPHA * spp + (1 - EMA_ALPHA) * _ema_spp)
-                            _last_pct = pct
-                            _last_t   = now
-
+                        if force or done != _last_done:
+                            _last_done = done
                             overall = 12 + pct * 0.73
-                            eta = int(_ema_spp * (100 - pct)) if _ema_spp and pct < 100 else 0
+                            processed = max(0, done - _start_done)
+                            remaining = max(0, total - done)
+                            elapsed = max(0.001, now - _start_t)
+                            eta = int((elapsed / processed) * remaining) if processed > 0 else 0
                             update_job(job_id, {
-                                'stage':         f'Upscaleando frames… {pct:.1f}%',
+                                'stage':         f'Upscaleando frames ({done}/{total}) · {pct:.1f}%',
                                 'progress':      round(overall, 1),
-                                'current_frame': int(len(needed) * pct / 100),
+                                'current_frame': done,
+                                'frames_to_process': total,
                                 'eta':           eta,
                             })
+
+                    _update_from_counts(force=True)
+                    try:
+                        while p.poll() is None:
+                            if self.queue.should_stop():
+                                p.terminate()
+                                try:
+                                    p.wait(timeout=5)
+                                except subprocess.TimeoutExpired:
+                                    p.kill()
+                                    p.wait()
+                                return p
+                            time.sleep(0.5)
+                            _update_from_counts()
+                    finally:
+                        log_f.close()
+
+                    _update_from_counts(force=True)
                     p.wait()
                     return p
 
@@ -365,23 +428,26 @@ class VideoProcessor:
 
     # ── Step 3 – Reassemble video ─────────────────────────────────────────────
 
-    def _assemble_video(self, job_id: str, job: dict, upscaled_dir: str, log_path: str):
+    def _assemble_video(self, job_id: str, job: dict, frames_input_dir: str,
+                        log_path: str, used_upscayl: bool,
+                        process_started_at: float, base_elapsed: float):
         update_job(job_id, {'stage': 'Armando video final', 'progress': 87})
         self._log(log_path, '\n=== ASSEMBLE VIDEO ===')
 
         safe_model = job['model'].replace('/', '_')
-        out_name   = f"upscaled_{job['id'][:8]}_{job['scale']}x_{safe_model}.mp4"
+        out_suffix = self._output_suffix(job)
+        out_name   = f"upscaled_{job['id'][:8]}_{job['scale']}x_{safe_model}{out_suffix}.mp4"
         out_path   = os.path.join(config.OUTPUT_FOLDER, out_name)
         fps        = job['fps']
         has_audio  = self._has_audio(job['filepath'])
 
-        frame_pattern = os.path.join(upscaled_dir, 'frame_%06d.png')
+        frame_pattern = os.path.join(frames_input_dir, 'frame_%06d.png')
 
         # Verify we actually have frames before trying to encode
-        png_count = len(glob.glob(os.path.join(upscaled_dir, '*.png')))
+        png_count = len(glob.glob(os.path.join(frames_input_dir, '*.png')))
         self._log(log_path, f'fps={fps}  has_audio={has_audio}  png_count={png_count}  out={out_path}')
         if png_count == 0:
-            raise RuntimeError('No hay frames upscaleados en el directorio de salida.')
+            raise RuntimeError('No hay frames disponibles para armar el video.')
 
         # ── Choose encoder: NVENC (GPU) or libx264 (CPU fallback) ────────────
         use_nvenc = config.USE_NVENC and self._nvenc_available()
@@ -394,12 +460,19 @@ class VideoProcessor:
         encoder_name = 'h264_nvenc' if use_nvenc else 'libx264'
         self._log(log_path, f'encoder={encoder_name}')
 
+        scale_filter = self._build_output_scale_filter(job, used_upscayl)
+        if scale_filter:
+            self._log(log_path, f'output_scale_filter={scale_filter}')
+
         encode_base = [
             'ffmpeg', '-y',
             '-start_number', '1',      # explicit: frames are frame_000001.png…
             '-framerate', str(fps),
             '-i', frame_pattern,
-        ] + encoder_args
+        ]
+        if scale_filter:
+            encode_base += ['-vf', scale_filter]
+        encode_base += encoder_args
 
         if has_audio:
             start_t  = job['start_frame'] / fps
@@ -421,12 +494,14 @@ class VideoProcessor:
             self._run_log(encode_base + [out_path], log_path)
 
         self._log(log_path, f'Assembly complete: {out_path}')
+        total_elapsed = base_elapsed + max(0.0, time.time() - process_started_at)
         update_job(job_id, {
             'status':       'completed',
             'stage':        'Completado ✓',
             'progress':     100,
             'output_path':  out_path,
             'completed_at': time.time(),
+            'elapsed_time': round(total_elapsed, 1),
             'eta':          0,
         })
 
@@ -489,6 +564,98 @@ class VideoProcessor:
             return 0
         avg = sum(self._recent_frame_times) / len(self._recent_frame_times)
         return int(avg * frames_remaining)
+
+    def _count_pngs(self, directory: str) -> int:
+        """Count PNG files with shell-equivalent semantics: ls <dir>/*.png | wc -l."""
+        return len(glob.glob(os.path.join(directory, '*.png')))
+
+    def _build_output_scale_filter(self, job: dict, used_upscayl: bool) -> str:
+        """Build optional FFmpeg scale filter for final output sizing."""
+        out_w, out_h = self._desired_output_size(job)
+        in_w = int(job.get('width', 0) or 0)
+        in_h = int(job.get('height', 0) or 0)
+        if used_upscayl:
+            scale = max(1, int(job.get('scale', 1) or 1))
+            in_w *= scale
+            in_h *= scale
+
+        if out_w > 0 and out_h > 0 and (out_w != in_w or out_h != in_h):
+            return f'scale={out_w}:{out_h}'
+        return ''
+
+    def _desired_output_size(self, job: dict) -> tuple[int, int]:
+        """Compute final output size from scale + optional final resize inputs."""
+        src_w = int(job.get('width', 0) or 0)
+        src_h = int(job.get('height', 0) or 0)
+        scale = max(1, int(job.get('scale', 1) or 1))
+        factor = float(job.get('output_factor', 1.0) or 1.0)
+        if factor <= 0:
+            factor = 1.0
+        target_w = int(job.get('target_width', 0) or 0)
+        target_h = int(job.get('target_height', 0) or 0)
+
+        base_w = src_w * scale
+        base_h = src_h * scale
+
+        def _even(n: int) -> int:
+            n = max(2, int(n))
+            return n - (n % 2)
+
+        if target_w > 0 and target_h > 0:
+            return _even(target_w), _even(target_h)
+        if target_w > 0:
+            out_w = _even(target_w)
+            out_h = _even(round(base_h * out_w / max(base_w, 1)))
+            return out_w, out_h
+        if target_h > 0:
+            out_h = _even(target_h)
+            out_w = _even(round(base_w * out_h / max(base_h, 1)))
+            return out_w, out_h
+        if abs(factor - 1.0) > 1e-6:
+            return _even(round(base_w * factor)), _even(round(base_h * factor))
+        return max(base_w, 0), max(base_h, 0)
+
+    def _should_use_upscayl(self, job: dict) -> bool:
+        """Use upscayl only if final target is larger than the source dimensions."""
+        out_w, out_h = self._desired_output_size(job)
+        src_w = int(job.get('width', 0) or 0)
+        src_h = int(job.get('height', 0) or 0)
+        if src_w <= 0 or src_h <= 0 or out_w <= 0 or out_h <= 0:
+            return True
+        return out_w > src_w or out_h > src_h
+
+    def _output_suffix(self, job: dict) -> str:
+        target_w = int(job.get('target_width', 0) or 0)
+        target_h = int(job.get('target_height', 0) or 0)
+        factor   = float(job.get('output_factor', 1.0) or 1.0)
+        if target_w > 0 and target_h > 0:
+            return f'_{target_w}x{target_h}'
+        if target_w > 0:
+            return f'_w{target_w}'
+        if target_h > 0:
+            return f'_h{target_h}'
+        if abs(factor - 1.0) > 1e-6:
+            return f'_f{factor:g}'
+        return ''
+
+    def _model_is_installed(self, model_id: str) -> bool:
+        if not config.UPSCAYL_MODELS_DIR:
+            return False
+        param = os.path.join(config.UPSCAYL_MODELS_DIR, f'{model_id}.param')
+        binf  = os.path.join(config.UPSCAYL_MODELS_DIR, f'{model_id}.bin')
+        return os.path.isfile(param) and os.path.isfile(binf)
+
+    def _list_installed_models(self) -> list[str]:
+        if not config.UPSCAYL_MODELS_DIR or not os.path.isdir(config.UPSCAYL_MODELS_DIR):
+            return []
+        out = []
+        for fname in sorted(os.listdir(config.UPSCAYL_MODELS_DIR)):
+            if not fname.endswith('.param'):
+                continue
+            mid = fname[:-6]
+            if os.path.isfile(os.path.join(config.UPSCAYL_MODELS_DIR, f'{mid}.bin')):
+                out.append(mid)
+        return out
 
     def _log(self, log_path: str, msg: str):
         try:

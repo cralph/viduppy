@@ -220,6 +220,14 @@ def create_job_route():
         if k not in d:
             return jsonify({'error': f'Missing field: {k}'}), 400
 
+    output_factor = float(d.get('output_factor', 1.0) or 1.0)
+    target_width  = int(d.get('target_width', 0) or 0)
+    target_height = int(d.get('target_height', 0) or 0)
+    if output_factor <= 0:
+        return jsonify({'error': 'output_factor debe ser > 0'}), 400
+    if target_width < 0 or target_height < 0:
+        return jsonify({'error': 'target_width/target_height no pueden ser negativos'}), 400
+
     create_job({
         'id':            d['job_id'],
         'original_name': d['filename'],
@@ -233,6 +241,9 @@ def create_job_route():
         'duration':      float(d['duration']),
         'width':         int(d['width']),
         'height':        int(d['height']),
+        'output_factor': output_factor,
+        'target_width':  target_width,
+        'target_height': target_height,
         'status':        'queued',
         'stage':         'En cola',
         'progress':      0,
@@ -262,7 +273,11 @@ def pause_job(job_id):
 
 @app.route('/job/<job_id>/resume', methods=['POST'])
 def resume_job(job_id):
-    queue.resume_job(job_id)
+    resumed = queue.resume_job(job_id)
+    if not resumed:
+        # Safety net: after a server restart the in-memory paused set is empty.
+        # Ensure the job is still re-enqueued when user clicks Resume.
+        queue.add_job(job_id)
     # Reset started_at so the frontend delta is correct from this moment
     update_job(job_id, {
         'status':     'queued',
