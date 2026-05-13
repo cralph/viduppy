@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+{% block title %}{{ job.original_name }} · VidUpscaler{% endblock %}
+
+{% block content %}
+{% set model_name = models | selectattr('id','eq',job.model) | map(attribute='name') | first | default(job.model) %}
+{% set frames = job.end_frame - job.start_frame %}
+
+<div class="is-flex is-align-items-center mb-4">
+  <a class="button is-light is-small mr-3" href="/"><span class="icon"><i class="fas fa-arrow-left"></i></span></a>
+  <h1 class="title is-4 mb-0" style="word-break:break-all;">{{ job.original_name }}</h1>
+</div>
+
+<div class="columns is-variable is-5">
+
+  <!-- Left: status & progress -->
+  <div class="column is-5">
+    <div class="box">
+      <h2 class="title is-5 mb-3">Estado del trabajo</h2>
+
+      <!-- Status badge -->
+      <div class="mb-4">
+        <span class="tag is-medium
+          {% if job.status == 'completed' %}is-success
+          {% elif job.status == 'processing' %}is-info
+          {% elif job.status == 'error' %}is-danger
+          {% elif job.status == 'paused' %}is-warning
+          {% elif job.status == 'cancelled' %}is-light
+          {% else %}is-warning is-light{% endif %}"
+          id="status-badge">
+          {{ {'queued':'En cola','processing':'Procesando','paused':'Pausado',
+              'completed':'Completado','cancelled':'Cancelado','error':'Error'}
+             .get(job.status, job.status) }}
+        </span>
+      </div>
+
+      <!-- Progress bar -->
+      <div class="mb-4">
+        <div class="is-flex is-justify-content-space-between mb-1">
+          <small id="detail-stage">{{ job.stage }}</small>
+          <small id="detail-pct">{{ job.progress | round | int }}%</small>
+        </div>
+        <progress class="progress is-info" id="detail-progress"
+          value="{{ job.progress | round | int }}" max="100"></progress>
+        <p class="is-size-7 has-text-grey" id="detail-eta">
+          {% if job.eta %}ETA: ~{{ job.eta // 60 }}m {{ job.eta % 60 }}s{% endif %}
+        </p>
+      </div>
+
+      <!-- Frames counter -->
+      <div class="notification is-light py-2 px-3 is-size-7 mb-3">
+        <div class="is-flex is-justify-content-space-between">
+          <span>Frames procesados:</span>
+          <span><strong id="detail-cur-frame">{{ job.current_frame }}</strong>
+            / <span id="detail-tot-frame">{{ job.frames_to_process }}</span></span>
+        </div>
+      </div>
+
+      <!-- Controls -->
+      <div class="buttons" id="job-controls">
+        {% if job.status == 'processing' %}
+          <button class="button is-warning" onclick="act('pause')">
+            <span class="icon"><i class="fas fa-pause"></i></span><span>Pausar</span></button>
+          <button class="button is-danger" onclick="act('cancel')">
+            <span class="icon"><i class="fas fa-stop"></i></span><span>Cancelar</span></button>
+        {% elif job.status == 'paused' %}
+          <button class="button is-info" onclick="act('resume')">
+            <span class="icon"><i class="fas fa-play"></i></span><span>Reanudar</span></button>
+          <button class="button is-danger" onclick="act('cancel')">
+            <span class="icon"><i class="fas fa-stop"></i></span><span>Cancelar</span></button>
+        {% elif job.status == 'queued' %}
+          <button class="button is-warning" onclick="act('pause')">
+            <span class="icon"><i class="fas fa-pause"></i></span><span>Pausar</span></button>
+          <button class="button is-danger" onclick="act('cancel')">
+            <span class="icon"><i class="fas fa-times"></i></span><span>Cancelar</span></button>
+        {% elif job.status in ['completed','cancelled','error'] %}
+          <button class="button is-primary" onclick="act('reprocess')">
+            <span class="icon"><i class="fas fa-redo"></i></span><span>Reprocesar</span></button>
+        {% endif %}
+      </div>
+
+      {% if job.error_msg %}
+      <div class="notification is-danger is-light mt-2">
+        <p class="is-size-7"><strong>Error:</strong> {{ job.error_msg }}</p>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Metadata -->
+    <div class="box">
+      <h2 class="title is-5 mb-3">Detalles</h2>
+      <table class="table is-narrow is-fullwidth is-size-7">
+        <tbody>
+          <tr><th>Archivo</th><td style="word-break:break-all;">{{ job.original_name }}</td></tr>
+          <tr><th>Modelo</th><td>{{ model_name }}</td></tr>
+          <tr><th>Escala</th><td>{{ job.scale }}x</td></tr>
+          <tr><th>Frames rango</th><td>{{ job.start_frame }} → {{ job.end_frame }} ({{ frames }} frames)</td></tr>
+          <tr><th>FPS</th><td>{{ job.fps }}</td></tr>
+          <tr><th>Resolución origen</th><td>{{ job.width }}×{{ job.height }}</td></tr>
+          <tr><th>Resolución salida</th><td>{{ job.width * job.scale }}×{{ job.height * job.scale }}</td></tr>
+          {% if job.created_at %}
+          <tr><th>Creado</th><td id="created-at" data-ts="{{ job.created_at }}"></td></tr>
+          {% endif %}
+          {% if job.started_at %}
+          <tr><th>Iniciado</th><td id="started-at" data-ts="{{ job.started_at }}"></td></tr>
+          {% endif %}
+          {% if job.completed_at %}
+          <tr><th>Completado</th><td id="completed-at" data-ts="{{ job.completed_at }}"></td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Right: preview -->
+  <div class="column">
+    <!-- Output video (completed) -->
+    <div id="output-section" {% if job.status != 'completed' %}style="display:none"{% endif %}>
+      <div class="box">
+        <h2 class="title is-5 mb-3">
+          <span class="icon has-text-success"><i class="fas fa-check-circle"></i></span>
+          Video upscaleado
+        </h2>
+        <video id="output-video" controls playsinline
+          style="width:100%;border-radius:6px;background:#000;"
+          {% if job.output_path %}src="/output/preview/{{ job.id }}"{% endif %}>
+        </video>
+        <div class="mt-3 buttons">
+          <a class="button is-success" href="/output/{{ job.id }}" id="download-btn">
+            <span class="icon"><i class="fas fa-download"></i></span>
+            <span>Descargar MP4</span>
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Original video preview -->
+    <div class="box" id="original-section">
+      <h2 class="title is-5 mb-3">Video original</h2>
+      <video controls playsinline
+        src="/video/{{ job.id }}"
+        style="width:100%;border-radius:6px;background:#000;">
+      </video>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const JOB_ID = '{{ job.id }}';
+
+// Format timestamps
+document.querySelectorAll('[data-ts]').forEach(el => {
+  const d = new Date(parseFloat(el.dataset.ts) * 1000);
+  el.textContent = d.toLocaleString();
+});
+
+// Status label map
+const STATUS_LABELS = {
+  queued: 'En cola', processing: 'Procesando', paused: 'Pausado',
+  completed: 'Completado', cancelled: 'Cancelado', error: 'Error'
+};
+const STATUS_CLASSES = {
+  queued: 'is-warning is-light', processing: 'is-info', paused: 'is-warning',
+  completed: 'is-success', cancelled: 'is-light', error: 'is-danger'
+};
+
+function buildControls(status) {
+  const m = {
+    processing: `<button class="button is-warning" onclick="act('pause')">
+        <span class="icon"><i class="fas fa-pause"></i></span><span>Pausar</span></button>
+      <button class="button is-danger" onclick="act('cancel')">
+        <span class="icon"><i class="fas fa-stop"></i></span><span>Cancelar</span></button>`,
+    paused: `<button class="button is-info" onclick="act('resume')">
+        <span class="icon"><i class="fas fa-play"></i></span><span>Reanudar</span></button>
+      <button class="button is-danger" onclick="act('cancel')">
+        <span class="icon"><i class="fas fa-stop"></i></span><span>Cancelar</span></button>`,
+    queued: `<button class="button is-warning" onclick="act('pause')">
+        <span class="icon"><i class="fas fa-pause"></i></span><span>Pausar</span></button>
+      <button class="button is-danger" onclick="act('cancel')">
+        <span class="icon"><i class="fas fa-times"></i></span><span>Cancelar</span></button>`,
+  };
+  const reprocess = `<button class="button is-primary" onclick="act('reprocess')">
+    <span class="icon"><i class="fas fa-redo"></i></span><span>Reprocesar</span></button>`;
+  return m[status] || (['completed','cancelled','error'].includes(status) ? reprocess : '');
+}
+
+// SSE
+const es = new EventSource('/events');
+es.onmessage = (e) => {
+  const data = JSON.parse(e.data);
+  const job  = (data.jobs || []).find(j => j.id === JOB_ID);
+  if (!job) return;
+
+  const pct = Math.round(job.progress || 0);
+
+  document.getElementById('detail-stage').textContent   = job.stage || '';
+  document.getElementById('detail-pct').textContent     = pct + '%';
+  document.getElementById('detail-progress').value      = pct;
+  document.getElementById('detail-cur-frame').textContent = job.current_frame || 0;
+  document.getElementById('detail-tot-frame').textContent = job.frames_to_process || 0;
+
+  const etaEl = document.getElementById('detail-eta');
+  if (job.eta > 0) {
+    const m = Math.floor(job.eta / 60), s = job.eta % 60;
+    etaEl.textContent = `ETA: ~${m}m ${s}s`;
+  } else { etaEl.textContent = ''; }
+
+  // Status badge
+  const badge = document.getElementById('status-badge');
+  badge.className = `tag is-medium ${STATUS_CLASSES[job.status] || 'is-light'}`;
+  badge.textContent = STATUS_LABELS[job.status] || job.status;
+
+  // Controls
+  document.getElementById('job-controls').innerHTML = buildControls(job.status);
+
+  // Output section
+  if (job.status === 'completed' && job.output_path) {
+    document.getElementById('output-section').style.display = '';
+    const vid = document.getElementById('output-video');
+    if (!vid.src || vid.src === window.location.href) {
+      vid.src = `/output/preview/${JOB_ID}`;
+      vid.load();
+    }
+  }
+};
+
+async function act(action) {
+  await fetch(`/job/${JOB_ID}/${action}`, {method: 'POST'});
+}
+</script>
+{% endblock %}

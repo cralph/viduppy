@@ -1,0 +1,79 @@
+{% set pct = job.progress | round | int %}
+{% set frames = job.end_frame - job.start_frame %}
+{% set model_name = models | selectattr('id','eq',job.model) | map(attribute='name') | first | default(job.model) %}
+<div class="box job-card mb-3" data-id="{{ job.id }}">
+  <div class="is-flex is-justify-content-space-between is-align-items-start">
+    <div style="flex:1;min-width:0;">
+      <p class="has-text-weight-semibold" style="word-break:break-all;">{{ job.original_name }}</p>
+      <div class="tags mt-1 mb-0">
+        {% if job.status == 'queued' %}
+          <span class="tag is-warning is-light">En cola</span>
+        {% elif job.status == 'processing' %}
+          <span class="tag is-info">Procesando</span>
+        {% elif job.status == 'paused' %}
+          <span class="tag is-warning">Pausado</span>
+        {% elif job.status == 'completed' %}
+          <span class="tag is-success">Completado</span>
+        {% elif job.status == 'cancelled' %}
+          <span class="tag is-light">Cancelado</span>
+        {% elif job.status == 'error' %}
+          <span class="tag is-danger">Error</span>
+        {% endif %}
+        <span class="tag is-dark">{{ job.scale }}x</span>
+        <span class="tag is-light">{{ model_name }}</span>
+        <span class="tag is-light">{{ frames }} frames</span>
+        {% if job.width %}<span class="tag is-light">{{ job.width }}×{{ job.height }}</span>{% endif %}
+      </div>
+      {% if job.status == 'processing' %}
+        <progress class="progress is-info is-small mt-2" value="{{ pct }}" max="100">{{ pct }}%</progress>
+        <div class="is-flex is-justify-content-space-between">
+          <small class="has-text-grey">{{ job.stage }}</small>
+          {% if job.eta %}<small class="has-text-info">~{{ job.eta // 60 }}m {{ job.eta % 60 }}s</small>{% endif %}
+        </div>
+      {% endif %}
+      {% if job.error_msg %}<p class="has-text-danger is-size-7 mt-1">{{ job.error_msg }}</p>{% endif %}
+    </div>
+    <div class="buttons are-small ml-3 mt-1" style="flex-shrink:0;">
+      <a class="button is-light" href="/job/{{ job.id }}">
+        <span class="icon"><i class="fas fa-eye"></i></span>
+      </a>
+      {% if job.status == 'processing' %}
+        <button class="button is-warning is-small" onclick="jobAction('{{ job.id }}','pause')">
+          <span class="icon"><i class="fas fa-pause"></i></span>
+        </button>
+        <button class="button is-danger is-small" onclick="jobAction('{{ job.id }}','cancel')">
+          <span class="icon"><i class="fas fa-stop"></i></span>
+        </button>
+      {% elif job.status == 'paused' %}
+        <button class="button is-info is-small" onclick="jobAction('{{ job.id }}','resume')">
+          <span class="icon"><i class="fas fa-play"></i></span>
+        </button>
+      {% elif job.status == 'queued' %}
+        <button class="button is-warning is-small" onclick="jobAction('{{ job.id }}','pause')">
+          <span class="icon"><i class="fas fa-pause"></i></span>
+        </button>
+        <button class="button is-danger is-small" onclick="jobAction('{{ job.id }}','cancel')">
+          <span class="icon"><i class="fas fa-times"></i></span>
+        </button>
+      {% elif job.status == 'completed' %}
+        <a class="button is-success is-small" href="/output/preview/{{ job.id }}" target="_blank">
+          <span class="icon"><i class="fas fa-play"></i></span>
+        </a>
+        <a class="button is-link is-small" href="/output/{{ job.id }}">
+          <span class="icon"><i class="fas fa-download"></i></span>
+        </a>
+        <button class="button is-light is-small" onclick="jobAction('{{ job.id }}','reprocess')">
+          <span class="icon"><i class="fas fa-redo"></i></span>
+        </button>
+      {% elif job.status in ['cancelled','error'] %}
+        <button class="button is-info is-small" onclick="jobAction('{{ job.id }}','reprocess')">
+          <span class="icon"><i class="fas fa-redo"></i></span>
+          <span>Reprocesar</span>
+        </button>
+      {% endif %}
+      <button class="button is-danger is-light is-small" onclick="deleteJob('{{ job.id }}')" title="Eliminar">
+        <span class="icon"><i class="fas fa-trash"></i></span>
+      </button>
+    </div>
+  </div>
+</div>

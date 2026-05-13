@@ -1,0 +1,499 @@
+{% extends "base.html" %}
+{% block title %}Nueva tarea · VidUpscaler{% endblock %}
+
+{% block content %}
+<div class="columns is-centered">
+<div class="column is-10">
+
+<h1 class="title is-4 mb-5">
+  <span class="icon has-text-primary"><i class="fas fa-plus-circle"></i></span>
+  Nueva tarea de upscaling
+</h1>
+
+<!-- Step 1: Upload -->
+<div id="step-upload">
+  <div class="box">
+    <h2 class="title is-5 mb-3">1 · Subir video</h2>
+
+    <div id="drop-zone" class="drop-zone" onclick="document.getElementById('file-input').click()">
+      <div id="drop-content">
+        <span class="icon is-large has-text-grey mb-3"><i class="fas fa-cloud-upload-alt fa-3x"></i></span>
+        <p class="has-text-grey-light">Arrastra tu video aquí o <strong>haz clic para seleccionar</strong></p>
+        <p class="is-size-7 has-text-grey mt-1">MP4, MOV, MKV, AVI, WEBM · hasta 20 GB</p>
+      </div>
+      <div id="drop-progress" style="display:none;" class="has-text-centered">
+        <p class="has-text-grey-light mb-2" id="upload-status">Subiendo…</p>
+        <progress class="progress is-primary" id="upload-bar" value="0" max="100"></progress>
+      </div>
+    </div>
+    <input type="file" id="file-input" accept="video/*" style="display:none"/>
+  </div>
+</div>
+
+<!-- Step 2: Configure (hidden until upload done) -->
+<div id="step-configure" style="display:none;">
+
+  <!-- Video info banner -->
+  <div class="box" id="video-info-box">
+    <div class="columns is-vcentered">
+      <div class="column">
+        <p class="has-text-weight-semibold" id="info-name"></p>
+        <div class="tags mt-1" id="info-tags"></div>
+      </div>
+      <div class="column is-narrow">
+        <button class="button is-light is-small" onclick="resetUpload()">
+          <span class="icon"><i class="fas fa-redo"></i></span>
+          <span>Cambiar video</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Video preview + timeline -->
+  <div class="box mb-4">
+    <h2 class="title is-5 mb-3">2 · Seleccionar rango de frames</h2>
+
+    <div class="video-preview-container" id="preview-container">
+      <video id="video-preview" controls playsinline
+        style="width:100%;max-height:400px;background:#000;display:block;border-radius:6px;">
+      </video>
+    </div>
+
+    <!-- Timeline -->
+    <div class="timeline-container mt-3" id="timeline-container">
+      <!-- Thumbnail strip -->
+      <canvas id="thumb-canvas" class="thumb-canvas"></canvas>
+
+      <!-- Range bar -->
+      <div class="timeline-bar" id="timeline-bar">
+        <div class="tl-selected" id="tl-selected"></div>
+        <div class="tl-handle tl-handle-start" id="tl-start" title="Inicio"></div>
+        <div class="tl-handle tl-handle-end"   id="tl-end"   title="Fin"></div>
+        <div class="tl-playhead" id="tl-playhead"></div>
+      </div>
+
+      <!-- Labels -->
+      <div class="tl-labels">
+        <div class="tl-label-group">
+          <span class="has-text-success">▶ Inicio:</span>
+          <span id="lbl-start-frame" class="has-text-weight-bold">0</span>
+          <span class="has-text-grey is-size-7" id="lbl-start-time">0:00.000</span>
+        </div>
+        <div class="tl-label-group has-text-centered">
+          <span class="has-text-grey">pos:</span>
+          <span id="lbl-current-frame" class="has-text-weight-bold">0</span>
+          <span class="has-text-grey is-size-7" id="lbl-current-time">0:00.000</span>
+        </div>
+        <div class="tl-label-group" style="text-align:right;">
+          <span class="has-text-danger">■ Fin:</span>
+          <span id="lbl-end-frame" class="has-text-weight-bold">0</span>
+          <span class="has-text-grey is-size-7" id="lbl-end-time">0:00.000</span>
+        </div>
+      </div>
+
+      <!-- Quick range buttons -->
+      <div class="buttons are-small mt-2">
+        <button class="button is-light is-small" onclick="TL.selectAll()">Todo el video</button>
+        <button class="button is-light is-small" onclick="TL.selectFirst(25)">Primeros 25%</button>
+        <button class="button is-light is-small" onclick="TL.selectFirst(50)">Primeros 50%</button>
+        <button class="button is-light is-small" onclick="TL.selectLast(25)">Últimos 25%</button>
+      </div>
+
+      <!-- Frame count summary -->
+      <div class="notification is-info is-light py-2 px-3 mt-2 is-size-7" id="range-summary">
+        Seleccionados: <strong id="range-frames">0</strong> frames
+        (<span id="range-duration">0.00</span>s)
+        → procesará <strong id="range-mb">?</strong> imágenes
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings -->
+  <div class="box mb-4">
+    <h2 class="title is-5 mb-3">3 · Configuración de upscaling</h2>
+
+    <div class="columns">
+      <div class="column">
+        <div class="field">
+          <label class="label">Modelo Upscayl</label>
+          <div class="control">
+            <div class="select is-fullwidth">
+              <select id="sel-model">
+                {% for m in models %}
+                <option value="{{ m.id }}">{{ m.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          <p class="help">Real-ESRGAN x4+ General es el mejor para la mayoría de videos.</p>
+        </div>
+      </div>
+      <div class="column is-narrow">
+        <div class="field">
+          <label class="label">Factor de escala</label>
+          <div class="control">
+            <div class="buttons has-addons">
+              {% for s in scales %}
+              <button class="button scale-btn {% if s == 2 %}is-primary{% endif %}"
+                data-scale="{{ s }}" onclick="setScale({{ s }})">{{ s }}x</button>
+              {% endfor %}
+            </div>
+          </div>
+          <p class="help">x2 es más rápido, x4 mayor calidad.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Output estimate -->
+    <div class="notification is-light py-2 px-3 is-size-7" id="output-estimate">
+      Resolución de salida: <strong id="out-res">?</strong>
+    </div>
+  </div>
+
+  <!-- Submit -->
+  <div class="box">
+    <div class="is-flex is-justify-content-space-between is-align-items-center">
+      <div>
+        <p class="has-text-weight-semibold">Agregar a cola de proceso</p>
+        <p class="is-size-7 has-text-grey" id="submit-summary">—</p>
+      </div>
+      <button class="button is-primary is-medium" id="btn-submit" onclick="submitJob()">
+        <span class="icon"><i class="fas fa-play-circle"></i></span>
+        <span>Agregar a cola</span>
+      </button>
+    </div>
+  </div>
+
+</div><!-- /#step-configure -->
+
+</div><!-- .column -->
+</div><!-- .columns -->
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Global job state ──────────────────────────────────────────────────────────
+let JOB = {
+  job_id: null, filename: null, filepath: null,
+  fps: 30, total_frames: 0, duration: 0, width: 0, height: 0,
+};
+let selectedScale = 2;
+
+// ── Drop zone ─────────────────────────────────────────────────────────────────
+const dropZone  = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+
+['dragenter','dragover'].forEach(ev =>
+  dropZone.addEventListener(ev, e => { e.preventDefault(); dropZone.classList.add('is-dragover'); })
+);
+['dragleave','dragend','drop'].forEach(ev =>
+  dropZone.addEventListener(ev, e => { e.preventDefault(); dropZone.classList.remove('is-dragover'); })
+);
+dropZone.addEventListener('drop', e => handleFile(e.dataTransfer.files[0]));
+fileInput.addEventListener('change', e => handleFile(e.target.files[0]));
+
+function handleFile(file) {
+  if (!file) return;
+  document.getElementById('drop-content').style.display  = 'none';
+  document.getElementById('drop-progress').style.display = 'block';
+
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/upload');
+
+  xhr.upload.onprogress = (e) => {
+    if (e.lengthComputable) {
+      const pct = Math.round(e.loaded / e.total * 100);
+      document.getElementById('upload-bar').value    = pct;
+      document.getElementById('upload-status').textContent = `Subiendo… ${pct}%`;
+    }
+  };
+
+  xhr.onload = () => {
+    const data = JSON.parse(xhr.responseText);
+    if (data.error) { alert(data.error); resetUpload(); return; }
+    onUploadDone(data, file);
+  };
+  xhr.onerror = () => { alert('Error de red subiendo el archivo.'); resetUpload(); };
+
+  const fd = new FormData();
+  fd.append('video', file);
+  xhr.send(fd);
+}
+
+function onUploadDone(data, file) {
+  Object.assign(JOB, data);
+  JOB.filename = file.name;
+
+  // Show video info banner
+  document.getElementById('info-name').textContent = file.name;
+  document.getElementById('info-tags').innerHTML = `
+    <span class="tag is-dark">${data.width}×${data.height}</span>
+    <span class="tag is-light">${data.fps} fps</span>
+    <span class="tag is-light">${data.total_frames} frames</span>
+    <span class="tag is-light">${fmtDuration(data.duration)}</span>`;
+
+  // ── FIX: Init timeline IMMEDIATELY from server data (no need to wait for video) ──
+  // ffprobe already gave us total_frames and fps at upload time
+  TL.init(data.total_frames, data.fps);
+  updateOutputEstimate();
+
+  // Show the configure section NOW (timeline is ready)
+  document.getElementById('step-upload').style.display    = 'none';
+  document.getElementById('step-configure').style.display = 'block';
+
+  // Load video preview asynchronously — thumbnails and scrubbing work once it loads
+  const vid = document.getElementById('video-preview');
+  vid.src = `/video/${data.job_id}`;
+  vid.load();
+
+  vid.addEventListener('loadedmetadata', () => {
+    TL.buildThumbs();   // Build thumbnail strip once video is accessible
+  }, {once: true});
+
+  vid.addEventListener('timeupdate', () => {
+    TL.setPlayhead(vid.currentTime);
+  });
+}
+
+function resetUpload() {
+  document.getElementById('step-upload').style.display    = 'block';
+  document.getElementById('step-configure').style.display = 'none';
+  document.getElementById('drop-content').style.display   = 'block';
+  document.getElementById('drop-progress').style.display  = 'none';
+  document.getElementById('upload-bar').value = 0;
+  fileInput.value = '';
+  JOB.job_id = null;
+}
+
+// ── Timeline ──────────────────────────────────────────────────────────────────
+const TL = (() => {
+  let totalFrames = 0, fps = 30;
+  let startFrame = 0, endFrame = 0;
+  let dragging = null;  // 'start' | 'end' | 'seek'
+
+  const bar      = document.getElementById('timeline-bar');
+  const sel      = document.getElementById('tl-selected');
+  const hStart   = document.getElementById('tl-start');
+  const hEnd     = document.getElementById('tl-end');
+  const playhead = document.getElementById('tl-playhead');
+
+  function init(frames, _fps) {
+    totalFrames = frames;
+    fps = _fps;
+    startFrame  = 0;
+    endFrame    = frames;
+    render();
+    buildThumbs();
+  }
+
+  function render() {
+    const s = startFrame / totalFrames * 100;
+    const e = endFrame   / totalFrames * 100;
+    hStart.style.left = s + '%';
+    hEnd.style.left   = e + '%';
+    sel.style.left    = s + '%';
+    sel.style.width   = (e - s) + '%';
+
+    // Labels
+    document.getElementById('lbl-start-frame').textContent = startFrame;
+    document.getElementById('lbl-end-frame').textContent   = endFrame;
+    document.getElementById('lbl-start-time').textContent  = fmtTime(startFrame / fps);
+    document.getElementById('lbl-end-time').textContent    = fmtTime(endFrame   / fps);
+
+    const count = endFrame - startFrame;
+    const dur   = count / fps;
+    document.getElementById('range-frames').textContent   = count;
+    document.getElementById('range-duration').textContent = dur.toFixed(2);
+    document.getElementById('range-mb').textContent       = count;
+    updateSubmitSummary();
+    updateOutputEstimate();
+  }
+
+  function setPlayhead(currentTime) {
+    const pct = (currentTime / (totalFrames / fps)) * 100;
+    playhead.style.left = Math.min(100, pct) + '%';
+    const frame = Math.round(currentTime * fps);
+    document.getElementById('lbl-current-frame').textContent = frame;
+    document.getElementById('lbl-current-time').textContent  = fmtTime(currentTime);
+  }
+
+  function pctFromEvent(e) {
+    const rect = bar.getBoundingClientRect();
+    const x    = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+    return Math.max(0, Math.min(1, x / rect.width));
+  }
+
+  function startDrag(type) { dragging = type; }
+
+  function onMove(e) {
+    if (!dragging) return;
+    e.preventDefault();
+    const pct   = pctFromEvent(e);
+    const frame = Math.round(pct * totalFrames);
+
+    if (dragging === 'start') {
+      startFrame = Math.min(frame, endFrame - 1);
+    } else if (dragging === 'end') {
+      endFrame = Math.max(frame, startFrame + 1);
+    } else if (dragging === 'seek') {
+      seekVideo(frame / fps);
+    }
+    render();
+  }
+
+  function onUp() { dragging = null; }
+
+  // Bar click → seek
+  bar.addEventListener('mousedown',  e => { startDrag('seek'); onMove(e); });
+  bar.addEventListener('touchstart', e => { startDrag('seek'); onMove(e); }, {passive:false});
+  hStart.addEventListener('mousedown',  e => { e.stopPropagation(); startDrag('start'); });
+  hStart.addEventListener('touchstart', e => { e.stopPropagation(); startDrag('start'); }, {passive:false});
+  hEnd.addEventListener('mousedown',    e => { e.stopPropagation(); startDrag('end'); });
+  hEnd.addEventListener('touchstart',   e => { e.stopPropagation(); startDrag('end'); }, {passive:false});
+  document.addEventListener('mousemove',  onMove);
+  document.addEventListener('touchmove',  onMove, {passive:false});
+  document.addEventListener('mouseup',    onUp);
+  document.addEventListener('touchend',   onUp);
+
+  function seekVideo(t) {
+    const vid = document.getElementById('video-preview');
+    vid.currentTime = Math.max(0, Math.min(vid.duration || 0, t));
+  }
+
+  function buildThumbs() {
+    const canvas = document.getElementById('thumb-canvas');
+    const ctx    = canvas.getContext('2d');
+    const vid    = document.getElementById('video-preview');
+    const W      = bar.offsetWidth || 800;
+    const H      = 48;
+    canvas.width  = W;
+    canvas.height = H;
+    canvas.style.width  = '100%';
+    canvas.style.height = H + 'px';
+
+    const thumbCount = Math.min(40, Math.floor(W / 20));
+    let idx = 0;
+
+    function captureNext() {
+      if (idx >= thumbCount) return;
+      const t = (idx / thumbCount) * (totalFrames / fps);
+      vid.currentTime = t;
+    }
+
+    vid.addEventListener('seeked', function onSeeked() {
+      if (idx >= thumbCount) { vid.removeEventListener('seeked', onSeeked); return; }
+      const thumbW = W / thumbCount;
+      ctx.drawImage(vid, idx * thumbW, 0, thumbW, H);
+      idx++;
+      captureNext();
+    });
+
+    captureNext();
+  }
+
+  return {
+    init,
+    setPlayhead,
+    buildThumbs,
+    selectAll()         { startFrame = 0; endFrame = totalFrames; render(); },
+    selectFirst(pct)    { startFrame = 0; endFrame = Math.round(totalFrames * pct / 100); render(); },
+    selectLast(pct)     { startFrame = Math.round(totalFrames * (1 - pct/100)); endFrame = totalFrames; render(); },
+    getStart()          { return startFrame; },
+    getEnd()            { return endFrame; },
+  };
+})();
+
+// ── Scale buttons ─────────────────────────────────────────────────────────────
+function setScale(s) {
+  selectedScale = s;
+  document.querySelectorAll('.scale-btn').forEach(b => {
+    b.classList.toggle('is-primary', parseInt(b.dataset.scale) === s);
+    b.classList.toggle('is-light', parseInt(b.dataset.scale) !== s);
+  });
+  updateOutputEstimate();
+}
+
+function updateOutputEstimate() {
+  if (!JOB.width) return;
+  const w = JOB.width * selectedScale;
+  const h = JOB.height * selectedScale;
+  document.getElementById('out-res').textContent = `${w} × ${h} px`;
+}
+
+function updateSubmitSummary() {
+  if (!JOB.total_frames) return;
+  const start = TL.getStart(), end = TL.getEnd();
+  const frames = end - start;
+  const model  = document.getElementById('sel-model').selectedOptions[0]?.text || '';
+  document.getElementById('submit-summary').textContent =
+    `${frames} frames · ${selectedScale}x · ${model}`;
+}
+
+// ── Submit ────────────────────────────────────────────────────────────────────
+async function submitJob() {
+  if (!JOB.job_id) { alert('Primero sube un video.'); return; }
+
+  const start = TL.getStart(), end = TL.getEnd();
+  if (end <= start) {
+    alert(`Rango inválido: el frame final (${end}) debe ser mayor que el inicial (${start}).\nAjusta los handles en el timeline.`);
+    return;
+  }
+  if (end - start < 2) {
+    alert('Selecciona al menos 2 frames para procesar.');
+    return;
+  }
+
+  const btn = document.getElementById('btn-submit');
+  btn.classList.add('is-loading');
+  btn.disabled = true;
+
+  const payload = {
+    job_id:       JOB.job_id,
+    filename:     JOB.filename,
+    filepath:     JOB.filepath,
+    scale:        selectedScale,
+    model:        document.getElementById('sel-model').value,
+    start_frame:  TL.getStart(),
+    end_frame:    TL.getEnd(),
+    total_frames: JOB.total_frames,
+    fps:          JOB.fps,
+    duration:     JOB.duration,
+    width:        JOB.width,
+    height:       JOB.height,
+  };
+
+  try {
+    const res  = await fetch('/job/create', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (data.success) {
+      window.location.href = '/';
+    } else {
+      alert('Error: ' + JSON.stringify(data));
+      btn.classList.remove('is-loading');
+      btn.disabled = false;
+    }
+  } catch (err) {
+    alert('Error de red: ' + err);
+    btn.classList.remove('is-loading');
+    btn.disabled = false;
+  }
+}
+
+// ── Utils ─────────────────────────────────────────────────────────────────────
+function fmtTime(s) {
+  const m   = Math.floor(s / 60);
+  const sec = (s % 60).toFixed(3).padStart(6,'0');
+  return `${m}:${sec}`;
+}
+function fmtDuration(s) {
+  const m = Math.floor(s / 60), sec = Math.round(s % 60);
+  return `${m}m ${sec}s`;
+}
+
+document.getElementById('sel-model').addEventListener('change', updateSubmitSummary);
+</script>
+{% endblock %}

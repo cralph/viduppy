@@ -1,0 +1,7 @@
+uploads/*
+outputs/*
+frames/*
+upscaled/*
+__pycache__/*
+*.db
+.DS_Store

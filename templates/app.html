@@ -1,0 +1,1248 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VidUpscaler Platform</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0a0f; --bg2: #111118; --bg3: #18181f; --bg4: #1e1e28;
+  --border: rgba(255,255,255,0.07); --border2: rgba(255,255,255,0.12);
+  --text: #e8e8f0; --text2: #9090a8; --text3: #5a5a72;
+  --accent: #7c6fff; --accent2: #5b4fd4;
+  --teal: #00d4aa; --teal2: #00a884;
+  --amber: #ffb547; --red: #ff5757; --green: #4ade80;
+  --mono: 'Space Mono', monospace; --sans: 'DM Sans', sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;line-height:1.5;min-height:100vh}
+a{color:inherit;text-decoration:none}
+button{font-family:var(--sans)}
+
+/* Layout */
+.shell{display:grid;grid-template-columns:220px 1fr;grid-template-rows:48px 1fr;height:100vh;overflow:hidden}
+.topbar{grid-column:1/-1;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;gap:12px;z-index:100}
+.sidebar{background:var(--bg2);border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column}
+.main{overflow-y:auto}
+
+/* Topbar */
+.logo{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--accent);letter-spacing:2px;text-transform:uppercase}
+.logo span{color:var(--teal)}
+.topbar-sep{width:1px;height:20px;background:var(--border);margin:0 4px}
+.status-dot{width:7px;height:7px;border-radius:50%;background:var(--teal);box-shadow:0 0 6px var(--teal);animation:pulse 2s infinite;flex-shrink:0}
+.status-dot.idle{background:var(--text3);box-shadow:none;animation:none}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* Sidebar */
+.sidebar-section{padding:16px 12px 8px}
+.sidebar-label{font-family:var(--mono);font-size:10px;color:var(--text3);letter-spacing:2px;text-transform:uppercase;margin-bottom:8px}
+.sidebar-btn{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;cursor:pointer;font-size:13px;color:var(--text2);transition:all .15s;border:none;background:none;width:100%;text-align:left}
+.sidebar-btn:hover{background:var(--bg3);color:var(--text)}
+.sidebar-btn.active{background:rgba(124,111,255,.15);color:var(--accent)}
+.sidebar-btn svg{width:15px;height:15px;flex-shrink:0}
+.sidebar-divider{border:none;border-top:1px solid var(--border);margin:6px 12px}
+.queue-count{margin-left:auto;background:var(--accent);color:#fff;font-size:10px;font-family:var(--mono);padding:1px 6px;border-radius:10px;font-weight:700}
+
+/* Panels */
+.panel{display:none}.panel.active{display:block}
+.content-pad{padding:24px}
+.section-title{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:2px;font-family:var(--mono);margin-bottom:16px}
+
+/* Upload Zone */
+.upload-zone{border:1.5px dashed var(--border2);border-radius:14px;padding:48px 32px;text-align:center;cursor:pointer;transition:all .2s;position:relative}
+.upload-zone:hover,.upload-zone.drag{border-color:var(--accent);background:rgba(124,111,255,.05)}
+.upload-zone input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.upload-icon{width:44px;height:44px;margin:0 auto 14px;color:var(--accent)}
+.upload-zone h3{font-size:14px;font-weight:500;margin-bottom:5px}
+.upload-zone p{font-size:12px;color:var(--text3)}
+.formats{margin-top:10px;display:flex;gap:5px;justify-content:center;flex-wrap:wrap}
+.format-tag{background:var(--bg3);border:1px solid var(--border);padding:2px 7px;border-radius:4px;font-family:var(--mono);font-size:10px;color:var(--text3)}
+
+/* Video Player */
+.video-player-wrap{position:relative;border-radius:10px;overflow:hidden;background:#000;aspect-ratio:16/9}
+.video-player-wrap video{width:100%;height:100%;object-fit:contain}
+
+/* Timeline */
+.timeline-wrap{margin-top:14px;user-select:none}
+.timeline-labels{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--text3);margin-bottom:5px}
+.timeline{position:relative;height:36px;background:var(--bg3);border-radius:7px;border:1px solid var(--border);cursor:pointer;overflow:hidden}
+.timeline-range{position:absolute;top:0;height:100%;background:rgba(124,111,255,.22);border-left:2px solid var(--accent);border-right:2px solid var(--accent)}
+.timeline-thumb{position:absolute;top:0;width:2px;height:100%;background:var(--teal);pointer-events:none;z-index:5}
+.timeline-thumb::before{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:8px;height:8px;background:var(--teal);border-radius:50%}
+.timeline-handle{position:absolute;top:0;width:8px;height:100%;cursor:ew-resize;z-index:20}
+.timeline-handle.left{left:0;background:var(--accent);border-radius:4px 0 0 4px}
+.timeline-handle.right{right:0;background:var(--accent);border-radius:0 4px 4px 0}
+.time-display{display:flex;gap:10px;align-items:center;margin-top:7px;flex-wrap:wrap}
+.time-display span{font-family:var(--mono);font-size:11px;color:var(--text2)}
+.time-display .range-pill{background:rgba(124,111,255,.12);border:1px solid rgba(124,111,255,.3);padding:2px 10px;border-radius:20px;color:var(--accent);font-size:11px}
+
+/* Controls */
+.controls-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px}
+.control-group{background:var(--bg3);border:1px solid var(--border);border-radius:9px;padding:13px}
+.control-group label{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;font-family:var(--mono);display:block;margin-bottom:9px}
+.scale-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}
+.scale-btn{background:var(--bg4);border:1px solid var(--border);border-radius:6px;padding:7px 4px;text-align:center;cursor:pointer;font-family:var(--mono);font-size:13px;font-weight:700;color:var(--text2);transition:all .15s}
+.scale-btn:hover{border-color:var(--accent);color:var(--accent)}
+.scale-btn.active{border-color:var(--accent);background:rgba(124,111,255,.15);color:var(--accent)}
+.model-grid{display:grid;gap:5px}
+.model-btn{background:var(--bg4);border:1px solid var(--border);border-radius:6px;padding:7px 9px;cursor:pointer;text-align:left;transition:all .15s}
+.model-btn:hover{border-color:var(--accent)}
+.model-btn.active{border-color:var(--accent);background:rgba(124,111,255,.1)}
+.model-btn .mn{font-size:12px;font-weight:500;color:var(--text)}
+.model-btn .md{font-size:11px;color:var(--text3);margin-top:1px}
+
+/* Submit */
+.submit-btn{width:100%;margin-top:18px;background:linear-gradient(135deg,var(--accent),var(--teal2));border:none;border-radius:9px;padding:13px;font-size:14px;font-weight:600;color:#fff;cursor:pointer;transition:all .2s;letter-spacing:.3px}
+.submit-btn:hover{transform:translateY(-1px);filter:brightness(1.1)}
+.submit-btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+
+/* Progress bar */
+.pbar-wrap{height:3px;background:var(--bg3);border-radius:2px;overflow:hidden}
+.pbar{height:100%;background:linear-gradient(90deg,var(--accent),var(--teal));border-radius:2px;transition:width .5s ease}
+
+/* Stats */
+.stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px}
+.stat-card{background:var(--bg2);border:1px solid var(--border);border-radius:9px;padding:13px 15px}
+.stat-val{font-size:22px;font-weight:600;font-family:var(--mono)}
+.stat-lbl{font-size:11px;color:var(--text3);margin-top:3px}
+
+/* Job list */
+.jobs-header{display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap}
+.jobs-header h2{font-size:15px;font-weight:500}
+.filter-tabs{display:flex;gap:4px;flex-wrap:wrap}
+.filter-tab{padding:4px 11px;border-radius:20px;font-size:12px;cursor:pointer;border:1px solid var(--border);color:var(--text2);background:none;transition:all .15s;font-family:var(--sans)}
+.filter-tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
+
+/* Job Card */
+.job-card{background:var(--bg2);border:1px solid var(--border);border-radius:11px;padding:14px;margin-bottom:9px;transition:border-color .15s}
+.job-card:hover{border-color:var(--border2)}
+.job-card.processing{border-left:3px solid var(--teal)}
+.job-card.error{border-left:3px solid var(--red)}
+.job-card.completed{border-left:3px solid var(--green)}
+.job-card.queued{border-left:3px solid var(--accent)}
+.job-card.paused{border-left:3px solid var(--amber)}
+.job-card.cancelled{border-left:3px solid var(--text3)}
+.job-header{display:flex;align-items:flex-start;gap:11px}
+.job-thumb{width:58px;height:38px;background:var(--bg3);border-radius:5px;flex-shrink:0;overflow:hidden}
+.job-thumb video{width:100%;height:100%;object-fit:cover}
+.job-info{flex:1;min-width:0}
+.job-name{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.job-meta{font-size:11px;color:var(--text3);margin-top:3px;font-family:var(--mono);display:flex;flex-wrap:wrap;gap:7px}
+.job-actions{display:flex;gap:5px;flex-shrink:0}
+.badge{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:10px;font-size:10px;font-family:var(--mono);font-weight:700;text-transform:uppercase;letter-spacing:.5px}
+.badge.queued{background:rgba(124,111,255,.15);color:var(--accent)}
+.badge.processing{background:rgba(0,212,170,.15);color:var(--teal)}
+.badge.completed{background:rgba(74,222,128,.15);color:var(--green)}
+.badge.error{background:rgba(255,87,87,.15);color:var(--red)}
+.badge.cancelled,.badge.paused{background:rgba(90,90,114,.2);color:var(--text3)}
+.badge.paused{background:rgba(255,181,71,.12);color:var(--amber)}
+
+/* Stage steps */
+.stage-line{margin-top:9px}
+.stage-label{display:flex;justify-content:space-between;font-size:11px;color:var(--text2);margin-bottom:3px;font-family:var(--mono)}
+.stage-steps{display:flex;gap:3px;margin-bottom:5px}
+.stage-step{flex:1;height:3px;border-radius:2px;background:var(--bg3)}
+.stage-step.done-step{background:var(--green)}
+.stage-step.current-step{background:var(--accent);position:relative;overflow:hidden}
+.stage-step.current-step::after{content:'';position:absolute;top:0;left:-100%;width:100%;height:100%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.4),transparent);animation:shimmer 1.5s infinite}
+@keyframes shimmer{to{left:100%}}
+
+/* Icon buttons */
+.icon-btn{background:var(--bg3);border:1px solid var(--border);border-radius:6px;width:27px;height:27px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text2);transition:all .15s;font-size:13px}
+.icon-btn:hover{border-color:var(--border2);color:var(--text)}
+.icon-btn.danger:hover{border-color:var(--red);color:var(--red)}
+.icon-btn.success:hover{border-color:var(--green);color:var(--green)}
+.icon-btn.warn:hover{border-color:var(--amber);color:var(--amber)}
+.eta-badge{font-family:var(--mono);font-size:10px;color:var(--amber);background:rgba(255,181,71,.1);padding:2px 7px;border-radius:10px}
+
+/* Modal */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px}
+.modal{background:var(--bg2);border:1px solid var(--border2);border-radius:14px;padding:22px;width:100%;max-width:700px}
+.modal h3{font-size:14px;font-weight:500;margin-bottom:14px}
+.modal-actions{display:flex;gap:9px;margin-top:14px}
+
+/* Settings */
+.setting-row{margin-bottom:16px}
+.setting-row label{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:1px;font-family:var(--mono);display:block;margin-bottom:7px}
+.setting-input{width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:9px 12px;font-size:13px;color:var(--text);font-family:var(--sans);outline:none;transition:border-color .15s}
+.setting-input:focus{border-color:var(--accent)}
+.setting-input::placeholder{color:var(--text3)}
+.btn{padding:8px 16px;border-radius:7px;border:none;cursor:pointer;font-size:13px;font-family:var(--sans);transition:all .15s}
+.btn-primary{background:var(--accent);color:#fff}.btn-primary:hover{background:var(--accent2)}
+.btn-ghost{background:var(--bg3);border:1px solid var(--border);color:var(--text2)}.btn-ghost:hover{color:var(--text);border-color:var(--border2)}
+.btn-danger{background:rgba(255,87,87,.15);border:1px solid rgba(255,87,87,.3);color:var(--red)}.btn-danger:hover{background:rgba(255,87,87,.25)}
+.status-ok{color:var(--green);font-size:12px}.status-bad{color:var(--red);font-size:12px}
+
+/* Info table */
+.info-table{width:100%;border-collapse:collapse;font-size:12px}
+.info-table td{padding:5px 10px;border-bottom:1px solid var(--border)}
+.info-table td:first-child{color:var(--text3);font-family:var(--mono);white-space:nowrap;width:140px}
+.info-table td:last-child{color:var(--text);word-break:break-all}
+
+/* Empty */
+.empty-state{text-align:center;padding:60px 20px;color:var(--text3)}
+.empty-state svg{width:44px;height:44px;margin:0 auto 14px;opacity:.25}
+
+/* Toast */
+.toast-container{position:fixed;bottom:22px;right:22px;display:flex;flex-direction:column;gap:7px;z-index:9999}
+.toast{background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:11px 14px;font-size:13px;animation:slideIn .2s ease;min-width:220px}
+.toast.success{border-left:3px solid var(--green)}
+.toast.error{border-left:3px solid var(--red)}
+.toast.info{border-left:3px solid var(--accent)}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--bg4);border-radius:3px}
+
+/* Upload progress */
+#uploadProgress{margin-top:10px}
+
+@media(max-width:768px){.shell{grid-template-columns:1fr}.sidebar{display:none}.stats-row{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- Topbar -->
+  <header class="topbar">
+    <div class="logo">VID<span>UPSCALER</span></div>
+    <div class="topbar-sep"></div>
+    <span style="font-size:12px;color:var(--text3)" id="workerStatus">Idle</span>
+    <div class="status-dot idle" id="statusDot"></div>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:14px">
+      <span id="activeJobTopbar" style="font-size:11px;color:var(--text3);font-family:var(--mono)"></span>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--text3)" id="clockEl"></span>
+    </div>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-label">Navigation</div>
+      <button class="sidebar-btn active" onclick="showPanel('new')" id="nav-new">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>
+        New Job
+      </button>
+      <button class="sidebar-btn" onclick="showPanel('queue')" id="nav-queue">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+        Queue
+        <span class="queue-count" id="queueBadge" style="display:none">0</span>
+      </button>
+      <button class="sidebar-btn" onclick="showPanel('settings')" id="nav-settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        Settings
+        <span id="settingsWarn" style="display:none;margin-left:auto;color:var(--amber);font-size:12px">⚠</span>
+      </button>
+    </div>
+    <hr class="sidebar-divider">
+    <div class="sidebar-section" style="flex:1">
+      <div class="sidebar-label">Active</div>
+      <div id="activeJobSidebar" style="font-size:12px;color:var(--text3);padding:2px 10px">No active job</div>
+    </div>
+    <div style="padding:14px;border-top:1px solid var(--border)">
+      <div style="font-size:11px;color:var(--text3)">ffmpeg + upscayl-bin</div>
+      <div style="font-size:10px;color:var(--text3);margin-top:2px;font-family:var(--mono)">localhost:5050</div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+
+    <!-- ── Panel: New Job ───────────────────────────────────────────────────── -->
+    <div class="panel active content-pad" id="panel-new">
+      <div class="section-title">New Upscaling Job</div>
+
+      <div id="uploadSection">
+        <div class="upload-zone" id="uploadZone">
+          <input type="file" id="fileInput" accept="video/*">
+          <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M15 10l-4 4-4-4M11 14V4"/><path d="M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v9a2 2 0 01-2 2h-2"/>
+          </svg>
+          <h3>Drop your video here</h3>
+          <p>or click to browse</p>
+          <div class="formats">
+            <span class="format-tag">MP4</span><span class="format-tag">MOV</span>
+            <span class="format-tag">MKV</span><span class="format-tag">AVI</span>
+            <span class="format-tag">WEBM</span>
+          </div>
+        </div>
+        <div id="uploadProgress" style="display:none;margin-top:10px">
+          <div style="font-size:12px;color:var(--text2);margin-bottom:5px" id="uploadStatusText">Uploading & analyzing…</div>
+          <div class="pbar-wrap"><div class="pbar" id="uploadBar" style="width:0%"></div></div>
+        </div>
+      </div>
+
+      <div id="videoPreviewWrap" style="display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:11px">
+          <div>
+            <div id="videoFileName" style="font-size:13px;font-weight:500"></div>
+            <div id="videoMeta" style="font-size:11px;color:var(--text3);font-family:var(--mono);margin-top:2px"></div>
+          </div>
+          <button onclick="resetUpload()" style="font-size:11px;color:var(--text3);background:none;border:none;cursor:pointer;padding:3px 7px">Change ×</button>
+        </div>
+
+        <div class="video-player-wrap">
+          <video id="mainVideo" controls preload="auto" crossorigin="anonymous"></video>
+        </div>
+
+        <!-- Timeline -->
+        <div class="timeline-wrap">
+          <div class="timeline-labels">
+            <span id="tlStart">0:00</span>
+            <span id="tlCurrent">0:00</span>
+            <span id="tlEnd">0:00</span>
+          </div>
+          <div class="timeline" id="timeline">
+            <div class="timeline-range" id="timelineRange"></div>
+            <div class="timeline-thumb" id="timelineThumb"></div>
+            <div class="timeline-handle left" id="handleLeft"></div>
+            <div class="timeline-handle right" id="handleRight"></div>
+          </div>
+          <div class="time-display">
+            <span>From: <b id="rangeFrom">0:00</b></span>
+            <span>→</span>
+            <span>To: <b id="rangeTo">0:00</b></span>
+            <span class="range-pill" id="rangeFrames">All frames</span>
+            <button onclick="selectAll()" style="font-size:11px;color:var(--text3);background:none;border:none;cursor:pointer">Select all</button>
+            <button onclick="selectPct(50)" style="font-size:11px;color:var(--text3);background:none;border:none;cursor:pointer">First 50%</button>
+          </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="controls-row">
+          <div class="control-group">
+            <label>Scale factor</label>
+            <div class="scale-grid" id="scaleGrid">
+              <div class="scale-btn active" data-scale="2" onclick="selectScale(2)">×2</div>
+              <div class="scale-btn" data-scale="3" onclick="selectScale(3)">×3</div>
+              <div class="scale-btn" data-scale="4" onclick="selectScale(4)">×4</div>
+            </div>
+          </div>
+          <div class="control-group">
+            <label>Upscayl Model</label>
+            <div class="model-grid" id="modelGrid"></div>
+          </div>
+        </div>
+
+        <div style="margin-top:14px;background:var(--bg3);border:1px solid var(--border);border-radius:9px;padding:10px 14px;font-size:12px;color:var(--text2)" id="outputEstimate">
+          Output resolution: <strong id="outRes">—</strong>
+        </div>
+
+        <button class="submit-btn" id="submitBtn" onclick="submitJob()">
+          ✦ Queue Upscaling Job
+        </button>
+      </div>
+    </div>
+
+    <!-- ── Panel: Queue ─────────────────────────────────────────────────────── -->
+    <div class="panel content-pad" id="panel-queue">
+      <div class="stats-row">
+        <div class="stat-card"><div class="stat-val" id="statTotal">0</div><div class="stat-lbl">Total jobs</div></div>
+        <div class="stat-card"><div class="stat-val" style="color:var(--teal)" id="statProcessing">0</div><div class="stat-lbl">Processing</div></div>
+        <div class="stat-card"><div class="stat-val" style="color:var(--accent)" id="statQueued">0</div><div class="stat-lbl">Queued</div></div>
+        <div class="stat-card"><div class="stat-val" style="color:var(--green)" id="statDone">0</div><div class="stat-lbl">Completed</div></div>
+      </div>
+      <div class="jobs-header">
+        <h2>Jobs</h2>
+        <div class="filter-tabs">
+          <button class="filter-tab active" onclick="setFilter('all',this)">All</button>
+          <button class="filter-tab" onclick="setFilter('processing',this)">Active</button>
+          <button class="filter-tab" onclick="setFilter('queued',this)">Queued</button>
+          <button class="filter-tab" onclick="setFilter('completed',this)">Done</button>
+          <button class="filter-tab" onclick="setFilter('error',this)">Error</button>
+        </div>
+      </div>
+      <div id="jobsList"></div>
+    </div>
+
+    <!-- ── Panel: Settings ──────────────────────────────────────────────────── -->
+    <div class="panel content-pad" id="panel-settings">
+      <div class="section-title">Configuration</div>
+
+      <!-- Status -->
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:11px;padding:16px;margin-bottom:20px">
+        <div style="font-size:12px;color:var(--text3);font-family:var(--mono);margin-bottom:10px">CURRENT STATUS</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px" id="settingsStatus">
+          <div>
+            <div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:4px">BINARY</div>
+            <div id="statusBin" class="status-bad">Not detected</div>
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:4px">MODELS DIR</div>
+            <div id="statusModels" class="status-bad">Not detected</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Paths hint table -->
+      <div style="background:var(--bg3);border:1px solid var(--border);border-radius:9px;padding:14px;margin-bottom:18px;font-size:11px">
+        <div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-bottom:8px">TYPICAL PATHS</div>
+        <table class="info-table">
+          <tr><td>macOS binary</td><td>/Applications/Upscayl.app/Contents/Resources/bin/upscayl-bin</td></tr>
+          <tr><td>macOS models</td><td>/Applications/Upscayl.app/Contents/Resources/models</td></tr>
+          <tr><td>Windows binary</td><td>C:\Program Files\Upscayl\resources\bin\upscayl-bin.exe</td></tr>
+          <tr><td>Windows models</td><td>C:\Program Files\Upscayl\resources\models</td></tr>
+        </table>
+        <div style="margin-top:8px;color:var(--text3)">macOS tip: run <code style="background:var(--bg2);padding:1px 5px;border-radius:3px;font-family:var(--mono)">find /Applications/Upscayl.app -name "upscayl-bin" 2>/dev/null</code> to locate the binary.</div>
+      </div>
+
+      <!-- GPU Acceleration -->
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:11px;padding:16px;margin-bottom:20px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <div>
+            <div style="font-size:12px;color:var(--text3);font-family:var(--mono);margin-bottom:2px">GPU ACCELERATION</div>
+            <div style="font-size:11px;color:var(--text3)">NVENC (FFmpeg encode) · Vulkan (upscayl-bin)</div>
+          </div>
+          <button class="btn btn-ghost" onclick="detectGPU()" id="btnDetectGPU" style="font-size:11px">↺ Scan</button>
+        </div>
+
+        <!-- NVENC status -->
+        <div style="display:flex;align-items:center;justify-content:space-between;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 13px;margin-bottom:10px">
+          <div>
+            <div style="font-size:12px;font-weight:500" id="nvencStatus">NVENC — scanning…</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px">Hardware H.264 encode via RTX/GTX (5–10× faster than libx264)</div>
+          </div>
+          <!-- Toggle switch -->
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <span style="font-size:11px;color:var(--text3)" id="nvencToggleLabel">OFF</span>
+            <div id="nvencToggle" onclick="toggleNvenc()" style="width:36px;height:20px;border-radius:10px;background:var(--bg4);border:1px solid var(--border);cursor:pointer;position:relative;transition:background .2s">
+              <div id="nvencKnob" style="position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--text3);transition:all .2s"></div>
+            </div>
+          </label>
+        </div>
+
+        <!-- Force CPU toggle -->
+        <div style="display:flex;align-items:center;justify-content:space-between;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 13px;margin-bottom:10px">
+          <div>
+            <div style="font-size:12px;font-weight:500">Force CPU mode <span style="font-family:var(--mono);font-size:10px;color:var(--teal)">-g -1</span></div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px">Bypass GPU entirely. Fixes black output on Apple Silicon / MoltenVK. Slower but always correct.</div>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <span style="font-size:11px;color:var(--text3)" id="cpuToggleLabel">OFF</span>
+            <div id="cpuToggle" onclick="toggleForceCPU()" style="width:36px;height:20px;border-radius:10px;background:var(--bg4);border:1px solid var(--border);cursor:pointer;position:relative;transition:background .2s">
+              <div id="cpuKnob" style="position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--text3);transition:all .2s"></div>
+            </div>
+          </label>
+        </div>
+
+        <!-- GPU device selector -->
+        <div id="gpuDeviceWrap">
+          <div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:6px">GPU DEVICE (Vulkan index for upscayl-bin)</div>
+          <div id="gpuList" style="display:flex;flex-wrap:wrap;gap:6px">
+            <div class="scale-btn active" data-gpuid="0" onclick="selectGPU(0,this)" style="min-width:60px">GPU 0</div>
+          </div>
+          <div style="font-size:10px;color:var(--text3);margin-top:6px">Device 0 is used by default. Select another if upscayl-bin should use a different GPU.</div>
+        </div>
+      </div>
+
+      <div class="setting-row">
+        <label>upscayl-bin path</label>
+        <input class="setting-input" id="inp-bin" type="text" placeholder="/Applications/Upscayl.app/Contents/Resources/bin/upscayl-bin">
+      </div>
+      <div class="setting-row">
+        <label>Models directory</label>
+        <input class="setting-input" id="inp-models" type="text" placeholder="/Applications/Upscayl.app/Contents/Resources/models">
+      </div>
+
+      <div id="settingsError" style="display:none;background:rgba(255,87,87,.1);border:1px solid rgba(255,87,87,.3);border-radius:7px;padding:10px 12px;font-size:12px;color:var(--red);margin-bottom:12px"></div>
+      <div id="settingsOk" style="display:none;background:rgba(74,222,128,.1);border:1px solid rgba(74,222,128,.3);border-radius:7px;padding:10px 12px;font-size:12px;color:var(--green);margin-bottom:12px">✓ Saved and applied.</div>
+
+      <div style="display:flex;gap:9px;flex-wrap:wrap">
+        <button class="btn btn-primary" id="btnSave" onclick="saveSettings()">Save settings</button>
+        <button class="btn btn-ghost" id="btnDetect" onclick="autoDetect()">↺ Auto-detect</button>
+        <button class="btn btn-danger" onclick="clearSettings()">Clear saved</button>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Log Modal -->
+<div class="modal-bg" id="logModal" style="display:none" onclick="if(event.target===this)closeLogModal()">
+  <div class="modal" style="max-width:860px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <h3 style="margin:0">📋 Job Log</h3>
+      <button onclick="closeLogModal()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:18px">×</button>
+    </div>
+    <pre id="logContent" style="background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:14px;font-family:var(--mono);font-size:11px;color:var(--text2);overflow:auto;max-height:60vh;white-space:pre-wrap;word-break:break-all">(loading…)</pre>
+  </div>
+</div>
+
+<!-- Output Modal -->
+<div class="modal-bg" id="outputModal" style="display:none" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <h3>✦ Output Ready</h3>
+    <div class="video-player-wrap">
+      <video id="outputVideo" controls style="width:100%"></video>
+    </div>
+    <div class="modal-actions">
+      <button onclick="downloadOutput()" style="flex:1;padding:10px;background:var(--accent);border:none;border-radius:7px;color:#fff;font-size:13px;cursor:pointer;font-family:var(--sans)">↓ Download MP4</button>
+      <button onclick="closeModal()" style="padding:10px 18px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;color:var(--text2);font-size:13px;cursor:pointer;font-family:var(--sans)">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-container" id="toasts"></div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+let videoData    = null;
+let selectedScale = 2;
+let selectedModel = 'realesrgan-x4plus';
+let models        = [];
+let allJobs       = [];
+let currentFilter = 'all';
+let rangeStartPct = 0;
+let rangeEndPct   = 1;
+let outputJobId   = null;
+
+// ── Clock ─────────────────────────────────────────────────────────────────────
+setInterval(() => {
+  document.getElementById('clockEl').textContent = new Date().toLocaleTimeString();
+}, 1000);
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function toast(msg, type = 'info') {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+// ── Panel nav ─────────────────────────────────────────────────────────────────
+function showPanel(id) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.getElementById(`panel-${id}`).classList.add('active');
+  document.querySelectorAll('.sidebar-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(`nav-${id}`).classList.add('active');
+  if (id === 'settings') loadSettingsUI();
+}
+
+// ── Models ────────────────────────────────────────────────────────────────────
+async function loadModels() {
+  try {
+    const r = await fetch('/api/models');
+    const d = await r.json();
+    models = d.models;
+    const grid = document.getElementById('modelGrid');
+    grid.innerHTML = models.map((m, i) => `
+      <div class="model-btn ${i === 0 ? 'active' : ''}" data-model="${m.id}" onclick="selectModel('${m.id}',this)">
+        <div class="mn">${m.name}</div>
+        <div class="md">${m.desc || ''}</div>
+      </div>`).join('');
+  } catch(e) { console.error('loadModels', e); }
+}
+loadModels();
+
+function selectScale(s) {
+  selectedScale = s;
+  document.querySelectorAll('.scale-btn').forEach(b =>
+    b.classList.toggle('active', parseInt(b.dataset.scale) === s));
+  updateOutputEstimate();
+}
+
+function selectModel(id, el) {
+  selectedModel = id;
+  document.querySelectorAll('.model-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+}
+
+// ── Upload ────────────────────────────────────────────────────────────────────
+const fileInput  = document.getElementById('fileInput');
+const uploadZone = document.getElementById('uploadZone');
+
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag'));
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault(); uploadZone.classList.remove('drag');
+  if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
+
+async function handleFile(file) {
+  document.getElementById('uploadProgress').style.display = 'block';
+  document.getElementById('uploadStatusText').textContent = 'Uploading & analyzing…';
+  const bar = document.getElementById('uploadBar');
+
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/upload');
+
+  xhr.upload.onprogress = (e) => {
+    if (e.lengthComputable) {
+      const pct = Math.round(e.loaded / e.total * 90);
+      bar.style.width = pct + '%';
+      document.getElementById('uploadStatusText').textContent = `Uploading… ${pct}%`;
+    }
+  };
+  xhr.onload = () => {
+    bar.style.width = '100%';
+    const d = JSON.parse(xhr.responseText);
+    if (d.error) { toast(d.error, 'error'); resetUpload(); return; }
+    videoData = d;
+    setTimeout(() => setupVideoPreview(d), 150);
+  };
+  xhr.onerror = () => { toast('Upload error', 'error'); resetUpload(); };
+
+  const fd = new FormData();
+  fd.append('video', file);
+  xhr.send(fd);
+}
+
+function setupVideoPreview(d) {
+  document.getElementById('uploadProgress').style.display = 'none';
+  document.getElementById('uploadSection').style.display = 'none';
+  document.getElementById('videoPreviewWrap').style.display = 'block';
+
+  document.getElementById('videoFileName').textContent = d.filename;
+  document.getElementById('videoMeta').textContent =
+    `${d.width}×${d.height} · ${d.fps.toFixed(2)} fps · ${fmtTime(d.duration)} · ${fmtFrames(d.total_frames)} frames`;
+
+  // ── FIX: Init range immediately from server data (don't wait for video load) ──
+  rangeStartPct = 0;
+  rangeEndPct   = 1;
+  updateTimeline();
+  document.getElementById('tlEnd').textContent = fmtTime(d.duration);
+  updateOutputEstimate();
+
+  // Load video (for playback / scrubbing — range already works without it)
+  const vid = document.getElementById('mainVideo');
+  vid.src = `/video/${d.job_id}`;
+  vid.load();
+
+  vid.addEventListener('timeupdate', () => {
+    const pct = vid.currentTime / (d.duration || 1);
+    document.getElementById('timelineThumb').style.left = (pct * 100) + '%';
+    document.getElementById('tlCurrent').textContent = fmtTime(vid.currentTime);
+  });
+
+  setupTimelineEvents(d);
+}
+
+function updateTimeline() {
+  if (!videoData) return;
+  const left  = rangeStartPct * 100;
+  const right = rangeEndPct   * 100;
+  document.getElementById('timelineRange').style.cssText  = `left:${left}%;width:${right - left}%`;
+  document.getElementById('handleLeft').style.left  = left + '%';
+  document.getElementById('handleRight').style.left = `calc(${right}% - 8px)`;
+
+  const dur   = videoData.duration;
+  document.getElementById('rangeFrom').textContent = fmtTime(rangeStartPct * dur);
+  document.getElementById('rangeTo').textContent   = fmtTime(rangeEndPct   * dur);
+  document.getElementById('tlStart').textContent   = fmtTime(rangeStartPct * dur);
+
+  const fStart = Math.floor(rangeStartPct * videoData.total_frames);
+  const fEnd   = Math.round(rangeEndPct   * videoData.total_frames);
+  const count  = fEnd - fStart;
+  document.getElementById('rangeFrames').textContent =
+    count === videoData.total_frames ? 'All frames' : `${fmtFrames(count)} frames (${fStart}→${fEnd})`;
+  updateOutputEstimate();
+}
+
+function setupTimelineEvents(d) {
+  const tl     = document.getElementById('timeline');
+  const hl     = document.getElementById('handleLeft');
+  const hr     = document.getElementById('handleRight');
+  const thumb  = document.getElementById('timelineThumb');
+  const vid    = document.getElementById('mainVideo');
+  let dragging = null;
+
+  function pctFromEvent(e) {
+    const rect = tl.getBoundingClientRect();
+    const x    = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+    return Math.max(0, Math.min(1, x / rect.width));
+  }
+
+  hl.addEventListener('mousedown',    e => { dragging = 'left';  e.preventDefault(); e.stopPropagation(); });
+  hr.addEventListener('mousedown',    e => { dragging = 'right'; e.preventDefault(); e.stopPropagation(); });
+  thumb.addEventListener('mousedown', e => { dragging = 'thumb'; e.stopPropagation(); });
+  tl.addEventListener('click', e => {
+    const pct = pctFromEvent(e);
+    if (vid.readyState >= 1) vid.currentTime = pct * d.duration;
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const pct = pctFromEvent(e);
+    if (dragging === 'left')       rangeStartPct = Math.min(pct, rangeEndPct - 0.005);
+    else if (dragging === 'right') rangeEndPct   = Math.max(pct, rangeStartPct + 0.005);
+    else if (dragging === 'thumb' && vid.readyState >= 1) vid.currentTime = pct * d.duration;
+    updateTimeline();
+  });
+  document.addEventListener('mouseup', () => { dragging = null; });
+}
+
+function selectAll()     { rangeStartPct = 0; rangeEndPct = 1;    updateTimeline(); }
+function selectPct(pct)  { rangeStartPct = 0; rangeEndPct = pct/100; updateTimeline(); }
+
+function updateOutputEstimate() {
+  if (!videoData) return;
+  const w = (videoData.width  || 0) * selectedScale;
+  const h = (videoData.height || 0) * selectedScale;
+  document.getElementById('outRes').textContent = w && h ? `${w} × ${h} px` : '—';
+}
+
+function resetUpload() {
+  videoData = null;
+  document.getElementById('uploadSection').style.display     = 'block';
+  document.getElementById('videoPreviewWrap').style.display   = 'none';
+  document.getElementById('uploadProgress').style.display     = 'none';
+  document.getElementById('mainVideo').src = '';
+  document.getElementById('uploadBar').style.width = '0%';
+  fileInput.value = '';
+}
+
+// ── Submit job ────────────────────────────────────────────────────────────────
+async function submitJob() {
+  if (!videoData) return;
+  const fStart = Math.floor(rangeStartPct * videoData.total_frames);
+  const fEnd   = Math.round(rangeEndPct   * videoData.total_frames);
+  if (fEnd - fStart < 2) { toast('Select at least 2 frames', 'error'); return; }
+
+  const btn = document.getElementById('submitBtn');
+  btn.disabled = true; btn.textContent = 'Queuing…';
+
+  try {
+    const r = await fetch('/job/create', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        job_id:       videoData.job_id,
+        filename:     videoData.filename,
+        filepath:     videoData.filepath,
+        scale:        selectedScale,
+        model:        selectedModel,
+        start_frame:  fStart,
+        end_frame:    fEnd,
+        total_frames: videoData.total_frames,
+        fps:          videoData.fps,
+        duration:     videoData.duration,
+        width:        videoData.width,
+        height:       videoData.height,
+      }),
+    });
+    const d = await r.json();
+    if (d.success) {
+      toast('Job queued ✓', 'success');
+      resetUpload();
+      showPanel('queue');
+    } else { toast('Error: ' + JSON.stringify(d), 'error'); }
+  } catch(e) { toast('Network error', 'error'); }
+
+  btn.disabled = false; btn.textContent = '✦ Queue Upscaling Job';
+}
+
+// ── SSE live updates ──────────────────────────────────────────────────────────
+(function startSSE() {
+  const es = new EventSource('/events');
+  es.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    allJobs = data.jobs || [];
+    renderQueue();
+    updateStats();
+    updateSidebar(data.active);
+  };
+  es.onerror = () => setTimeout(startSSE, 3000);
+})();
+
+// ── Queue rendering ───────────────────────────────────────────────────────────
+const STAGE_KEYS = ['queued','extracting','upscaling','assembling','done'];
+const STAGE_LABELS = {
+  queued: 'Queued', extracting: 'Extracting frames',
+  upscaling: 'Upscaling', assembling: 'Assembling', done: 'Done'
+};
+
+function inferStageKey(job) {
+  if (job.status === 'completed') return 'done';
+  if (['error','cancelled'].includes(job.status)) return 'queued';
+  const s = (job.stage || '').toLowerCase();
+  if (s.includes('extray') || s.includes('extract')) return 'extracting';
+  if (s.includes('upscale') || s.includes('upscayle')) return 'upscaling';
+  if (s.includes('armando') || s.includes('assembl')) return 'assembling';
+  if (job.status === 'processing') return 'extracting';
+  return 'queued';
+}
+
+function renderQueue() {
+  const list = document.getElementById('jobsList');
+  let jobs = allJobs;
+  if (currentFilter !== 'all') jobs = jobs.filter(j => j.status === currentFilter);
+  if (!jobs.length) {
+    list.innerHTML = `<div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+      <p>No jobs found</p></div>`;
+    return;
+  }
+  list.innerHTML = jobs.map(renderJobCard).join('');
+
+  const qCount = allJobs.filter(j => j.status === 'queued').length;
+  document.getElementById('queueBadge').textContent = qCount;
+  document.getElementById('queueBadge').style.display = qCount > 0 ? '' : 'none';
+}
+
+function renderJobCard(job) {
+  const sk  = inferStageKey(job);
+  const si  = STAGE_KEYS.indexOf(sk);
+  const pct = Math.round(job.progress || 0);
+
+  const stepsHtml = STAGE_KEYS.map((k, i) => {
+    let cls = 'stage-step';
+    if (i < si) cls += ' done-step';
+    else if (i === si && job.status === 'processing') cls += ' current-step';
+    return `<div class="${cls}" title="${STAGE_LABELS[k]}"></div>`;
+  }).join('');
+
+  const eta = job.eta > 0
+    ? `<span class="eta-badge">${fmtETA(job.eta)}</span>` : '';
+
+  const actions = [];
+  if (job.status === 'completed') {
+    actions.push(`<button class="icon-btn success" title="Preview" onclick="previewOutput('${job.id}')">▶</button>`);
+    actions.push(`<button class="icon-btn" title="Download" onclick="location.href='/output/${job.id}'">↓</button>`);
+    actions.push(`<button class="icon-btn" title="Reprocess" onclick="jobAct('${job.id}','reprocess')">↺</button>`);
+    actions.push(`<button class="icon-btn" title="Ver log" onclick="viewLog('${job.id}')">📋</button>`);
+  }
+  if (job.status === 'processing') {
+    actions.push(`<button class="icon-btn warn" title="Pause" onclick="jobAct('${job.id}','pause')">⏸</button>`);
+    actions.push(`<button class="icon-btn danger" title="Cancel" onclick="jobAct('${job.id}','cancel')">✕</button>`);
+  }
+  if (job.status === 'paused') {
+    actions.push(`<button class="icon-btn success" title="Resume" onclick="jobAct('${job.id}','resume')">▶</button>`);
+    actions.push(`<button class="icon-btn danger" title="Cancel" onclick="jobAct('${job.id}','cancel')">✕</button>`);
+  }
+  if (job.status === 'queued') {
+    actions.push(`<button class="icon-btn" title="Move up" onclick="movePriority('${job.id}','up')">↑</button>`);
+    actions.push(`<button class="icon-btn" title="Move down" onclick="movePriority('${job.id}','down')">↓</button>`);
+    actions.push(`<button class="icon-btn warn" title="Pause" onclick="jobAct('${job.id}','pause')">⏸</button>`);
+    actions.push(`<button class="icon-btn danger" title="Cancel" onclick="jobAct('${job.id}','cancel')">✕</button>`);
+  }
+  if (['error','cancelled'].includes(job.status)) {
+    actions.push(`<button class="icon-btn" title="Reprocess" onclick="jobAct('${job.id}','reprocess')">↺</button>`);
+    actions.push(`<button class="icon-btn" title="Ver log" onclick="viewLog('${job.id}')">📋</button>`);
+  }
+  actions.push(`<button class="icon-btn danger" title="Delete" onclick="jobAct('${job.id}','delete')">🗑</button>`);
+
+  const frameRange = job.start_frame != null
+    ? `${fmtFrames(job.start_frame)}→${fmtFrames(job.end_frame)}`
+    : 'all frames';
+  const createdStr = job.created_at
+    ? new Date(job.created_at * 1000).toLocaleString() : '';
+
+  const isUpscaling  = sk === 'upscaling' && (job.frames_to_process > 0);
+  const framePct     = isUpscaling
+    ? Math.min(100, (job.current_frame || 0) / (job.frames_to_process || 1) * 100)
+    : 0;
+  const elapsed      = getElapsed(job);
+
+  const showProgress = ['processing','queued','paused'].includes(job.status);
+  const progressHtml = showProgress ? `
+    <div class="stage-line">
+      <div class="stage-label">
+        <span>${job.stage || STAGE_LABELS[sk]}</span>
+        <span style="font-family:var(--mono);font-size:12px;font-weight:700">${pct}%</span>
+      </div>
+      <div class="stage-steps">${stepsHtml}</div>
+      <div class="pbar-wrap"><div class="pbar" style="width:${pct}%"></div></div>
+
+      ${isUpscaling ? `
+      <div style="margin-top:8px;padding:8px 11px;background:var(--bg3);border:1px solid var(--border);border-radius:7px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
+          <span style="font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:1px">Frames upscaleados</span>
+          <span style="font-family:var(--mono);font-size:16px;font-weight:700;color:var(--teal)">${framePct.toFixed(1)}%</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="flex:1;height:5px;background:var(--bg4);border-radius:3px;overflow:hidden">
+            <div style="height:100%;width:${framePct}%;background:var(--teal);border-radius:3px;transition:width .5s ease"></div>
+          </div>
+          <span style="font-family:var(--mono);font-size:11px;color:var(--text2);white-space:nowrap">${fmtFrames(job.current_frame||0)} / ${fmtFrames(job.frames_to_process||0)}</span>
+        </div>
+      </div>` : ''}
+
+      <div style="display:flex;gap:14px;margin-top:6px;font-family:var(--mono);font-size:10px;color:var(--text3);flex-wrap:wrap;align-items:center">
+        ${elapsed > 1 ? `<span title="Tiempo transcurrido">⏱ ${fmtElapsed(elapsed)}</span>` : ''}
+        ${job.eta > 0  ? `<span title="Tiempo estimado restante">🏁 ${fmtETA(job.eta)} restante</span>` : ''}
+      </div>
+    </div>` : '';
+
+  const errorHtml = job.status === 'error'
+    ? `<div style="font-size:11px;color:var(--red);margin-top:6px;font-family:var(--mono)">⚠ ${job.error_msg||'Unknown error'}</div>` : '';
+
+  return `
+  <div class="job-card ${job.status}" id="jc-${job.id}">
+    <div class="job-header">
+      <div class="job-thumb">
+        <video src="/video/${job.id}" muted preload="metadata" onloadedmetadata="this.currentTime=1"></video>
+      </div>
+      <div class="job-info">
+        <div class="job-name">${job.original_name}</div>
+        <div class="job-meta">
+          <span>×${job.scale}</span><span>${job.model}</span>
+          <span>${frameRange}</span><span>${job.width||'?'}×${job.height||'?'}</span>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px">
+        <span class="badge ${job.status}">${job.status}</span>
+        <div class="job-actions">${actions.join('')}</div>
+      </div>
+    </div>
+    ${progressHtml}${errorHtml}
+    <div style="font-size:10px;color:var(--text3);margin-top:7px;font-family:var(--mono)">${createdStr}</div>
+  </div>`;
+}
+
+function updateStats() {
+  document.getElementById('statTotal').textContent      = allJobs.length;
+  document.getElementById('statProcessing').textContent = allJobs.filter(j => j.status === 'processing').length;
+  document.getElementById('statQueued').textContent     = allJobs.filter(j => j.status === 'queued').length;
+  document.getElementById('statDone').textContent       = allJobs.filter(j => j.status === 'completed').length;
+}
+
+function updateSidebar(activeId) {
+  const active = allJobs.find(j => j.id === activeId && j.status === 'processing');
+  const dot    = document.getElementById('statusDot');
+  const sText  = document.getElementById('workerStatus');
+  const sEl    = document.getElementById('activeJobSidebar');
+  const topEl  = document.getElementById('activeJobTopbar');
+
+  if (active) {
+    dot.classList.remove('idle');
+    sText.textContent = 'Processing';
+    const pct = Math.round(active.progress || 0);
+    const activeElapsed = getElapsed(active);
+    sEl.innerHTML = `
+      <div style="color:var(--text);font-size:12px">${active.original_name}</div>
+      <div style="color:var(--teal);font-size:11px;margin-top:3px">${active.stage||''} · ${pct}%</div>
+      ${activeElapsed > 1 ? `<div style="color:var(--text3);font-size:10px;font-family:var(--mono);margin-top:2px">⏱ ${fmtElapsed(activeElapsed)}</div>` : ''}
+      <div class="pbar-wrap" style="margin-top:5px"><div class="pbar" style="width:${pct}%"></div></div>`;
+    topEl.textContent = `${active.original_name} · ${pct}% · ⏱${fmtElapsed(activeElapsed)}`;
+  } else {
+    dot.classList.add('idle');
+    sText.textContent = 'Idle';
+    sEl.textContent   = 'No active job';
+    topEl.textContent = '';
+  }
+}
+
+function setFilter(f, el) {
+  currentFilter = f;
+  document.querySelectorAll('.filter-tab').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  renderQueue();
+}
+
+// ── Job actions ───────────────────────────────────────────────────────────────
+async function jobAct(id, action) {
+  if (action === 'delete' && !confirm('Delete this job?')) return;
+  await fetch(`/job/${id}/${action}`, { method: 'POST' });
+  toast({ pause:'Paused', resume:'Resumed ▶', cancel:'Cancelled', reprocess:'Re-queued ↺', delete:'Deleted' }[action] || action, 'info');
+}
+
+async function movePriority(id, dir) {
+  await fetch(`/job/${id}/priority`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ direction: dir }),
+  });
+}
+
+// ── Output modal ──────────────────────────────────────────────────────────────
+function previewOutput(id) {
+  outputJobId = id;
+  document.getElementById('outputVideo').src = `/output/preview/${id}`;
+  document.getElementById('outputModal').style.display = 'flex';
+}
+function downloadOutput() { if (outputJobId) location.href = `/output/${outputJobId}`; }
+function closeModal() {
+  document.getElementById('outputModal').style.display = 'none';
+  document.getElementById('outputVideo').src = '';
+  outputJobId = null;
+}
+
+// ── Log modal ─────────────────────────────────────────────────────────────────
+async function viewLog(id) {
+  document.getElementById('logModal').style.display = 'flex';
+  document.getElementById('logContent').textContent = '(loading…)';
+  try {
+    const r = await fetch(`/api/job/${id}/log`);
+    const d = await r.json();
+    document.getElementById('logContent').textContent = d.log || '(empty)';
+  } catch(e) {
+    document.getElementById('logContent').textContent = 'Error fetching log: ' + e;
+  }
+}
+function closeLogModal() {
+  document.getElementById('logModal').style.display = 'none';
+}
+
+// ── Settings UI ───────────────────────────────────────────────────────────────
+async function loadSettingsUI() {
+  try {
+    const r = await fetch('/settings/detect', { method: 'POST' });
+    const d = await r.json();
+
+    // Use detect response to show current state
+    const binEl    = document.getElementById('statusBin');
+    const modelsEl = document.getElementById('statusModels');
+
+    if (d.upscayl_bin) {
+      binEl.className = 'status-ok';
+      binEl.textContent = '✓ ' + d.upscayl_bin;
+      document.getElementById('inp-bin').placeholder = d.upscayl_bin;
+    } else {
+      binEl.className = 'status-bad';
+      binEl.textContent = '✗ Not found';
+    }
+    if (d.upscayl_models_dir) {
+      modelsEl.className = 'status-ok';
+      modelsEl.textContent = '✓ ' + d.upscayl_models_dir;
+      document.getElementById('inp-models').placeholder = d.upscayl_models_dir;
+    } else {
+      modelsEl.className = 'status-bad';
+      modelsEl.textContent = '✗ Not found';
+    }
+
+    document.getElementById('settingsWarn').style.display =
+      (!d.upscayl_bin || !d.upscayl_models_dir) ? '' : 'none';
+  } catch(e) {}
+}
+
+async function autoDetect() {
+  document.getElementById('btnDetect').textContent = 'Detecting…';
+  try {
+    const r = await fetch('/settings/detect', { method: 'POST' });
+    const d = await r.json();
+    if (d.upscayl_bin)        document.getElementById('inp-bin').value    = d.upscayl_bin;
+    if (d.upscayl_models_dir) document.getElementById('inp-models').value = d.upscayl_models_dir;
+    toast(d.upscayl_bin ? 'Binary detected ✓' : 'Binary not found — enter path manually', d.upscayl_bin ? 'success' : 'error');
+    loadSettingsUI();
+  } finally {
+    document.getElementById('btnDetect').textContent = '↺ Auto-detect';
+  }
+}
+
+async function saveSettings() {
+  const bin    = document.getElementById('inp-bin').value.trim();
+  const models = document.getElementById('inp-models').value.trim();
+  const btn    = document.getElementById('btnSave');
+  btn.textContent = 'Saving…';
+
+  document.getElementById('settingsError').style.display = 'none';
+  document.getElementById('settingsOk').style.display    = 'none';
+
+  try {
+    const r = await fetch('/settings/save', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ upscayl_bin: bin, upscayl_models_dir: models }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      document.getElementById('settingsOk').style.display = '';
+      loadSettingsUI();
+    } else {
+      const errEl = document.getElementById('settingsError');
+      errEl.textContent = (d.errors || ['Error']).join(' · ');
+      errEl.style.display = '';
+    }
+  } catch(e) {
+    document.getElementById('settingsError').textContent = 'Network error';
+    document.getElementById('settingsError').style.display = '';
+  }
+  btn.textContent = 'Save settings';
+}
+
+function clearSettings() {
+  if (!confirm('Clear saved configuration?')) return;
+  document.getElementById('inp-bin').value    = '';
+  document.getElementById('inp-models').value = '';
+  saveSettings();
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function fmtTime(sec) {
+  const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
+  return `${m}:${s.toString().padStart(2,'0')}`;
+}
+function fmtETA(sec) {
+  if (!sec || sec <= 0) return '';
+  if (sec < 60)  return `~${Math.round(sec)}s`;
+  if (sec < 3600) return `~${Math.ceil(sec/60)}m`;
+  return `~${Math.floor(sec/3600)}h ${Math.ceil((sec%3600)/60)}m`;
+}
+function fmtFrames(n) { return (n ?? '?').toLocaleString(); }
+
+/** Returns total elapsed seconds for a job, including any accumulated before pauses. */
+function getElapsed(job) {
+  const base = parseFloat(job.elapsed_time || 0);
+  if (job.status === 'processing' && job.started_at) {
+    return base + (Date.now() / 1000 - parseFloat(job.started_at));
+  }
+  return base;
+}
+
+/** Formats elapsed seconds as "1m 04s", "2h 03m", etc. */
+function fmtElapsed(sec) {
+  if (!sec || sec < 1) return '0s';
+  const s = Math.floor(sec % 60);
+  const m = Math.floor(sec / 60) % 60;
+  const h = Math.floor(sec / 3600);
+  if (h > 0) return `${h}h ${m.toString().padStart(2,'0')}m`;
+  if (m > 0) return `${m}m ${s.toString().padStart(2,'0')}s`;
+  return `${s}s`;
+}
+
+// ── GPU state ─────────────────────────────────────────────────────────────────
+let nvencEnabled = false;
+let selectedGPU  = 0;
+let nvencAvailable = false;
+let forceCPU = false;
+
+async function detectGPU() {
+  const btn = document.getElementById('btnDetectGPU');
+  btn.textContent = 'Scanning…';
+  try {
+    const r = await fetch('/api/gpu');
+    const d = await r.json();
+    nvencAvailable = d.nvenc_available;
+    nvencEnabled   = d.use_nvenc;
+    selectedGPU    = d.gpu_device || 0;
+    if (d.force_cpu) { if (!forceCPU) toggleForceCPU(); }
+    else             { if (forceCPU)  toggleForceCPU(); }
+
+    // Update NVENC status
+    const statusEl = document.getElementById('nvencStatus');
+    if (nvencAvailable) {
+      statusEl.innerHTML = '<span style="color:var(--green)">✓ NVENC disponible</span> — h264_nvenc detectado';
+    } else {
+      statusEl.innerHTML = '<span style="color:var(--text3)">NVENC no disponible</span> — se usará libx264 (CPU)';
+    }
+
+    // Update toggle
+    _applyNvencToggle(nvencEnabled);
+
+    // Populate GPU list
+    const list = document.getElementById('gpuList');
+    if (d.gpus && d.gpus.length > 0) {
+      list.innerHTML = d.gpus.map(g => `
+        <div class="scale-btn ${g.id === selectedGPU ? 'active' : ''}"
+             data-gpuid="${g.id}"
+             onclick="selectGPU(${g.id},this)"
+             style="min-width:auto;padding:6px 12px">
+          GPU ${g.id} · <span style="font-size:11px;font-family:var(--sans)">${g.name}</span>
+        </div>`).join('');
+    } else {
+      list.innerHTML = `<div class="scale-btn active" data-gpuid="0" onclick="selectGPU(0,this)">GPU 0 (default)</div>`;
+    }
+
+    toast(nvencAvailable ? 'NVENC detectado ✓' : 'NVENC no disponible — se usará CPU', nvencAvailable ? 'success' : 'info');
+  } catch(e) {
+    toast('Error al detectar GPU', 'error');
+  }
+  btn.textContent = '↺ Scan';
+}
+
+function _applyNvencToggle(on) {
+  nvencEnabled = on;
+  const toggle = document.getElementById('nvencToggle');
+  const knob   = document.getElementById('nvencKnob');
+  const label  = document.getElementById('nvencToggleLabel');
+  if (on && nvencAvailable) {
+    toggle.style.background = 'var(--teal)';
+    toggle.style.borderColor = 'var(--teal)';
+    knob.style.left = '18px';
+    knob.style.background = '#fff';
+    label.textContent = 'ON';
+    label.style.color = 'var(--teal)';
+  } else {
+    toggle.style.background = 'var(--bg4)';
+    toggle.style.borderColor = 'var(--border)';
+    knob.style.left = '2px';
+    knob.style.background = 'var(--text3)';
+    label.textContent = 'OFF';
+    label.style.color = 'var(--text3)';
+  }
+}
+
+function toggleForceCPU() {
+  forceCPU = !forceCPU;
+  const toggle = document.getElementById('cpuToggle');
+  const knob   = document.getElementById('cpuKnob');
+  const label  = document.getElementById('cpuToggleLabel');
+  if (forceCPU) {
+    toggle.style.background = 'var(--amber)';
+    toggle.style.borderColor = 'var(--amber)';
+    knob.style.left = '18px';
+    knob.style.background = '#fff';
+    label.textContent = 'ON';
+    label.style.color = 'var(--amber)';
+  } else {
+    toggle.style.background = 'var(--bg4)';
+    toggle.style.borderColor = 'var(--border)';
+    knob.style.left = '2px';
+    knob.style.background = 'var(--text3)';
+    label.textContent = 'OFF';
+    label.style.color = 'var(--text3)';
+  }
+}
+
+function toggleNvenc() {
+  if (!nvencAvailable) {
+    toast('NVENC no disponible en este sistema. Haz clic en ↺ Scan primero.', 'error');
+    return;
+  }
+  _applyNvencToggle(!nvencEnabled);
+}
+
+function selectGPU(id, el) {
+  selectedGPU = id;
+  document.querySelectorAll('#gpuList .scale-btn').forEach(b =>
+    b.classList.toggle('active', parseInt(b.dataset.gpuid) === id));
+}
+
+// Override saveSettings to include GPU params
+const _origSaveSettings = saveSettings;
+saveSettings = async function() {
+  const bin    = document.getElementById('inp-bin').value.trim();
+  const models = document.getElementById('inp-models').value.trim();
+  const btn    = document.getElementById('btnSave');
+  btn.textContent = 'Saving…';
+
+  document.getElementById('settingsError').style.display = 'none';
+  document.getElementById('settingsOk').style.display    = 'none';
+
+  try {
+    const r = await fetch('/settings/save', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        upscayl_bin:        bin,
+        upscayl_models_dir: models,
+        use_nvenc:          nvencEnabled,
+        gpu_device:         selectedGPU,
+        force_cpu:          forceCPU,
+      }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      document.getElementById('settingsOk').style.display = '';
+      loadSettingsUI();
+    } else {
+      const errEl = document.getElementById('settingsError');
+      errEl.textContent = (d.errors || ['Error']).join(' · ');
+      errEl.style.display = '';
+    }
+  } catch(e) {
+    document.getElementById('settingsError').textContent = 'Network error';
+    document.getElementById('settingsError').style.display = '';
+  }
+  btn.textContent = 'Save settings';
+};
+
+// Initial load
+loadSettingsUI();
+detectGPU();
+</script>
+</body>
+</html>

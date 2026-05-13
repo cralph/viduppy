@@ -1,0 +1,230 @@
+{% extends "base.html" %}
+{% block title %}Configuración · VidUpscaler{% endblock %}
+
+{% block content %}
+<div class="columns is-centered">
+<div class="column is-8">
+
+<h1 class="title is-4 mb-5">
+  <span class="icon has-text-grey"><i class="fas fa-cog"></i></span>
+  Configuración
+</h1>
+
+<!-- Status card -->
+<div class="box mb-4">
+  <h2 class="title is-5 mb-3">Estado actual</h2>
+  <div class="columns">
+    <div class="column">
+      <p class="heading">Binario Upscayl</p>
+      {% if upscayl_bin %}
+        <p class="has-text-success">
+          <span class="icon"><i class="fas fa-check-circle"></i></span>
+          <span class="is-size-7" style="word-break:break-all;">{{ upscayl_bin }}</span>
+        </p>
+      {% else %}
+        <p class="has-text-danger">
+          <span class="icon"><i class="fas fa-times-circle"></i></span>
+          No detectado
+        </p>
+      {% endif %}
+    </div>
+    <div class="column">
+      <p class="heading">Directorio de modelos</p>
+      {% if upscayl_models_dir %}
+        <p class="has-text-success">
+          <span class="icon"><i class="fas fa-check-circle"></i></span>
+          <span class="is-size-7" style="word-break:break-all;">{{ upscayl_models_dir }}</span>
+        </p>
+      {% else %}
+        <p class="has-text-danger">
+          <span class="icon"><i class="fas fa-times-circle"></i></span>
+          No detectado
+        </p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Edit form -->
+<div class="box mb-4">
+  <h2 class="title is-5 mb-1">Rutas de Upscayl</h2>
+  <p class="has-text-grey is-size-7 mb-4">
+    Si la detección automática no funciona, ingresa las rutas manualmente.
+    Los cambios se guardan en <code>settings.json</code> y se aplican de inmediato sin reiniciar.
+  </p>
+
+  <!-- macOS hint -->
+  <div class="notification is-dark py-3 px-4 mb-4 is-size-7">
+    <p class="has-text-weight-semibold mb-1">📍 Rutas típicas según plataforma</p>
+    <table class="table is-narrow is-size-7" style="background:transparent;">
+      <thead><tr>
+        <th class="has-text-grey-light">Plataforma</th>
+        <th class="has-text-grey-light">Binario</th>
+        <th class="has-text-grey-light">Modelos</th>
+      </tr></thead>
+      <tbody>
+        <tr>
+          <td><span class="tag is-dark">macOS</span></td>
+          <td style="word-break:break-all;font-family:monospace;font-size:.7rem;">
+            /Applications/Upscayl.app/Contents/Resources/bin/upscayl-bin
+          </td>
+          <td style="word-break:break-all;font-family:monospace;font-size:.7rem;">
+            /Applications/Upscayl.app/Contents/Resources/models
+          </td>
+        </tr>
+        <tr>
+          <td><span class="tag is-dark">Windows</span></td>
+          <td style="word-break:break-all;font-family:monospace;font-size:.7rem;">
+            C:\Program Files\Upscayl\resources\bin\upscayl-bin.exe
+          </td>
+          <td style="word-break:break-all;font-family:monospace;font-size:.7rem;">
+            C:\Program Files\Upscayl\resources\models
+          </td>
+        </tr>
+        <tr>
+          <td><span class="tag is-dark">Linux</span></td>
+          <td style="font-family:monospace;font-size:.7rem;">/usr/bin/upscayl-bin</td>
+          <td style="font-family:monospace;font-size:.7rem;">/usr/share/upscayl/models</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="has-text-grey mt-2">
+      Tip macOS: abre Terminal y ejecuta
+      <code>find /Applications/Upscayl.app -name "upscayl-bin" 2>/dev/null</code>
+      para confirmar la ruta exacta en tu versión.
+    </p>
+  </div>
+
+  <div class="field">
+    <label class="label">Ruta al binario <code>upscayl-bin</code></label>
+    <div class="control has-icons-left">
+      <input class="input" type="text" id="inp-bin"
+        placeholder="Ej: /Applications/Upscayl.app/Contents/Resources/bin/upscayl-bin"
+        value="{{ upscayl_bin }}"/>
+      <span class="icon is-left"><i class="fas fa-terminal"></i></span>
+    </div>
+    <p class="help" id="help-bin"></p>
+  </div>
+
+  <div class="field">
+    <label class="label">Directorio de modelos</label>
+    <div class="control has-icons-left">
+      <input class="input" type="text" id="inp-models"
+        placeholder="Ej: /Applications/Upscayl.app/Contents/Resources/models"
+        value="{{ upscayl_models_dir }}"/>
+      <span class="icon is-left"><i class="fas fa-folder-open"></i></span>
+    </div>
+    <p class="help" id="help-models"></p>
+  </div>
+
+  <div id="save-error" class="notification is-danger is-light py-2 px-3 mb-3" style="display:none;"></div>
+  <div id="save-ok"    class="notification is-success is-light py-2 px-3 mb-3" style="display:none;">
+    <span class="icon"><i class="fas fa-check"></i></span> Guardado y aplicado correctamente.
+  </div>
+
+  <div class="buttons">
+    <button class="button is-primary" id="btn-save" onclick="saveSettings()">
+      <span class="icon"><i class="fas fa-save"></i></span>
+      <span>Guardar</span>
+    </button>
+    <button class="button is-light" id="btn-detect" onclick="autoDetect()">
+      <span class="icon"><i class="fas fa-search"></i></span>
+      <span>Re-detectar automáticamente</span>
+    </button>
+    <button class="button is-light is-danger" onclick="clearSettings()">
+      <span class="icon"><i class="fas fa-trash"></i></span>
+      <span>Limpiar configuración guardada</span>
+    </button>
+  </div>
+</div>
+
+<!-- Quick test -->
+<div class="box">
+  <h2 class="title is-5 mb-3">Verificar instalación</h2>
+  <p class="is-size-7 has-text-grey mb-3">
+    Ejecuta este comando en tu terminal para verificar que el binario funciona:
+  </p>
+  <pre class="is-size-7" id="test-cmd" style="background:#111;border-radius:6px;padding:1rem;color:#ddd;overflow-x:auto;">{{ upscayl_bin or '/ruta/a/upscayl-bin' }} --help</pre>
+
+  <p class="is-size-7 has-text-grey mt-3">
+    Si el comando devuelve la ayuda del programa, está listo para usar.
+    Si da <em>Permission denied</em>, ejecuta:
+    <code>chmod +x {{ upscayl_bin or '/ruta/a/upscayl-bin' }}</code>
+  </p>
+</div>
+
+</div><!-- .column -->
+</div><!-- .columns -->
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function saveSettings() {
+  const bin    = document.getElementById('inp-bin').value.trim();
+  const models = document.getElementById('inp-models').value.trim();
+  const btn    = document.getElementById('btn-save');
+  btn.classList.add('is-loading');
+
+  document.getElementById('save-error').style.display = 'none';
+  document.getElementById('save-ok').style.display    = 'none';
+
+  try {
+    const res  = await fetch('/settings/save', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({upscayl_bin: bin, upscayl_models_dir: models}),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      document.getElementById('save-ok').style.display = '';
+      // Update test command
+      document.getElementById('test-cmd').textContent = (data.upscayl_bin || bin) + ' --help';
+    } else {
+      const errEl = document.getElementById('save-error');
+      errEl.innerHTML = (data.errors || ['Error desconocido']).join('<br>');
+      errEl.style.display = '';
+    }
+  } catch (err) {
+    const errEl = document.getElementById('save-error');
+    errEl.textContent = 'Error de red: ' + err;
+    errEl.style.display = '';
+  } finally {
+    btn.classList.remove('is-loading');
+  }
+}
+
+async function autoDetect() {
+  const btn = document.getElementById('btn-detect');
+  btn.classList.add('is-loading');
+  try {
+    const res  = await fetch('/settings/detect', {method: 'POST'});
+    const data = await res.json();
+    if (data.upscayl_bin) {
+      document.getElementById('inp-bin').value = data.upscayl_bin;
+      document.getElementById('help-bin').textContent = '✓ Detectado automáticamente';
+      document.getElementById('help-bin').className = 'help is-success';
+    } else {
+      document.getElementById('help-bin').textContent = '⚠ No se pudo detectar automáticamente. Ingresa la ruta manualmente.';
+      document.getElementById('help-bin').className = 'help is-warning';
+    }
+    if (data.upscayl_models_dir) {
+      document.getElementById('inp-models').value = data.upscayl_models_dir;
+      document.getElementById('help-models').textContent = '✓ Detectado automáticamente';
+      document.getElementById('help-models').className = 'help is-success';
+    } else {
+      document.getElementById('help-models').textContent = '⚠ No se pudo detectar. Ingresa la ruta manualmente.';
+      document.getElementById('help-models').className = 'help is-warning';
+    }
+  } finally {
+    btn.classList.remove('is-loading');
+  }
+}
+
+function clearSettings() {
+  if (!confirm('¿Limpiar la configuración guardada y volver a la detección automática?')) return;
+  document.getElementById('inp-bin').value    = '';
+  document.getElementById('inp-models').value = '';
+  saveSettings();
+}
+</script>
+{% endblock %}

@@ -1,0 +1,321 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · VidUpscaler{% endblock %}
+
+{% block content %}
+
+{% if not upscayl_ok %}
+<div class="notification is-warning mb-4">
+  <span class="icon"><i class="fas fa-triangle-exclamation"></i></span>
+  <strong>Upscayl no encontrado.</strong> Edita <code>config.py</code> y ajusta
+  <code>UPSCAYL_BIN</code> y <code>UPSCAYL_MODELS_DIR</code>.
+</div>
+{% endif %}
+
+<!-- Stats row -->
+<div class="columns is-multiline mb-4" id="stats-row">
+  <div class="column is-3">
+    <div class="box has-background-dark has-text-white stat-box">
+      <p class="heading">Total trabajos</p>
+      <p class="title has-text-white" id="stat-total">{{ jobs|length }}</p>
+    </div>
+  </div>
+  <div class="column is-3">
+    <div class="box stat-box" style="background:#1a1a2e;">
+      <p class="heading has-text-grey-light">Procesando</p>
+      <p class="title has-text-info" id="stat-processing">
+        {{ jobs|selectattr('status','eq','processing')|list|length }}
+      </p>
+    </div>
+  </div>
+  <div class="column is-3">
+    <div class="box stat-box" style="background:#0f3460;">
+      <p class="heading has-text-grey-light">En cola</p>
+      <p class="title has-text-warning" id="stat-queued">
+        {{ jobs|selectattr('status','eq','queued')|list|length }}
+      </p>
+    </div>
+  </div>
+  <div class="column is-3">
+    <div class="box stat-box" style="background:#16213e;">
+      <p class="heading has-text-grey-light">Completados</p>
+      <p class="title has-text-success" id="stat-done">
+        {{ jobs|selectattr('status','eq','completed')|list|length }}
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- Active job card -->
+<div id="active-section" class="mb-5" {% if not active %}style="display:none"{% endif %}>
+  <h2 class="title is-5 mb-2">
+    <span class="icon has-text-info"><i class="fas fa-spinner fa-spin"></i></span>
+    Procesando ahora
+  </h2>
+  <div id="active-card"></div>
+</div>
+
+<!-- Queue -->
+<div class="columns is-variable is-5">
+  <div class="column is-4">
+    <div class="box">
+      <h2 class="title is-5 mb-3">
+        <span class="icon has-text-warning"><i class="fas fa-list-ol"></i></span>
+        Cola de proceso
+        <span class="tag is-warning is-light ml-2" id="queue-count">{{ queue_list|length }}</span>
+      </h2>
+      <div id="queue-list">
+        {% for jid in queue_list %}
+          {% set j = jobs|selectattr('id','eq',jid)|first %}
+          {% if j %}
+          <div class="queue-item box p-3 mb-2" data-id="{{ j.id }}">
+            <div class="is-flex is-justify-content-space-between is-align-items-center">
+              <div>
+                <span class="tag is-dark mr-1">#{{ loop.index }}</span>
+                <strong>{{ j.original_name|truncate(30) }}</strong>
+                <br>
+                <small class="has-text-grey">
+                  {{ j.scale }}x · {{ j.model }} ·
+                  {% set frames = j.end_frame - j.start_frame %}{{ frames }} frames
+                </small>
+              </div>
+              <div class="buttons are-small">
+                <button class="button is-light" title="Subir prioridad"
+                  onclick="changePriority('{{ j.id }}','up')">
+                  <span class="icon"><i class="fas fa-arrow-up"></i></span>
+                </button>
+                <button class="button is-light" title="Bajar prioridad"
+                  onclick="changePriority('{{ j.id }}','down')">
+                  <span class="icon"><i class="fas fa-arrow-down"></i></span>
+                </button>
+                <button class="button is-warning is-light" title="Pausar"
+                  onclick="jobAction('{{ j.id }}','pause')">
+                  <span class="icon"><i class="fas fa-pause"></i></span>
+                </button>
+                <button class="button is-danger is-light" title="Cancelar"
+                  onclick="jobAction('{{ j.id }}','cancel')">
+                  <span class="icon"><i class="fas fa-times"></i></span>
+                </button>
+              </div>
+            </div>
+          </div>
+          {% endif %}
+        {% else %}
+          <p class="has-text-grey-light has-text-centered py-4" id="queue-empty">
+            <span class="icon"><i class="fas fa-check-circle"></i></span>
+            Cola vacía
+          </p>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Job list -->
+  <div class="column">
+    <div class="is-flex is-justify-content-space-between is-align-items-center mb-3">
+      <h2 class="title is-5 mb-0">
+        <span class="icon"><i class="fas fa-history"></i></span>
+        Todos los trabajos
+      </h2>
+      <a class="button is-primary" href="/new">
+        <span class="icon"><i class="fas fa-plus"></i></span>
+        <span>Nueva tarea</span>
+      </a>
+    </div>
+
+    <div id="jobs-list">
+      {% for job in jobs %}
+        {% include '_job_card.html' %}
+      {% else %}
+        <div class="has-text-centered py-6 has-text-grey" id="no-jobs">
+          <span class="icon is-large"><i class="fas fa-film fa-3x"></i></span>
+          <p class="mt-3">No hay trabajos todavía. <a href="/new">Crear el primero →</a></p>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const MODELS = {{ models | tojson }};
+
+function fmtEta(s) {
+  if (!s || s <= 0) return '';
+  const m = Math.floor(s / 60), sec = s % 60;
+  return m > 0 ? `~${m}m ${sec}s` : `~${sec}s`;
+}
+
+function statusTag(status) {
+  const map = {
+    queued:     ['is-warning is-light', 'En cola'],
+    processing: ['is-info', 'Procesando'],
+    paused:     ['is-warning', 'Pausado'],
+    completed:  ['is-success', 'Completado'],
+    cancelled:  ['is-light', 'Cancelado'],
+    error:      ['is-danger', 'Error'],
+  };
+  const [cls, label] = map[status] || ['is-light', status];
+  return `<span class="tag ${cls}">${label}</span>`;
+}
+
+function buildJobCard(j) {
+  const pct      = Math.round(j.progress || 0);
+  const modelObj = MODELS.find(m => m.id === j.model) || {name: j.model};
+  const frames   = (j.end_frame || 0) - (j.start_frame || 0);
+  const eta      = fmtEta(j.eta);
+
+  const progressBar = j.status === 'processing' ? `
+    <progress class="progress is-info is-small mt-2" value="${pct}" max="100">${pct}%</progress>
+    <div class="is-flex is-justify-content-space-between">
+      <small class="has-text-grey">${j.stage || ''}</small>
+      <small class="has-text-info">${eta}</small>
+    </div>` : '';
+
+  const btns = (() => {
+    if (j.status === 'processing') return `
+      <button class="button is-warning is-small" onclick="jobAction('${j.id}','pause')">
+        <span class="icon"><i class="fas fa-pause"></i></span></button>
+      <button class="button is-danger is-small" onclick="jobAction('${j.id}','cancel')">
+        <span class="icon"><i class="fas fa-stop"></i></span></button>`;
+    if (j.status === 'paused') return `
+      <button class="button is-info is-small" onclick="jobAction('${j.id}','resume')">
+        <span class="icon"><i class="fas fa-play"></i></span></button>`;
+    if (j.status === 'queued') return `
+      <button class="button is-warning is-small" onclick="jobAction('${j.id}','pause')">
+        <span class="icon"><i class="fas fa-pause"></i></span></button>
+      <button class="button is-danger is-small" onclick="jobAction('${j.id}','cancel')">
+        <span class="icon"><i class="fas fa-times"></i></span></button>`;
+    if (j.status === 'completed') return `
+      <a class="button is-success is-small" href="/output/preview/${j.id}" target="_blank">
+        <span class="icon"><i class="fas fa-play"></i></span></a>
+      <a class="button is-link is-small" href="/output/${j.id}">
+        <span class="icon"><i class="fas fa-download"></i></span></a>
+      <button class="button is-light is-small" onclick="jobAction('${j.id}','reprocess')">
+        <span class="icon"><i class="fas fa-redo"></i></span></button>`;
+    if (['cancelled','error'].includes(j.status)) return `
+      <button class="button is-info is-small" onclick="jobAction('${j.id}','reprocess')">
+        <span class="icon"><i class="fas fa-redo"></i></span><span>Reprocesar</span></button>`;
+    return '';
+  })();
+
+  return `
+  <div class="box job-card mb-3" data-id="${j.id}">
+    <div class="is-flex is-justify-content-space-between is-align-items-start">
+      <div style="flex:1;min-width:0;">
+        <p class="has-text-weight-semibold text-truncate" style="word-break:break-all;">
+          ${j.original_name}
+        </p>
+        <div class="tags mt-1 mb-0">
+          ${statusTag(j.status)}
+          <span class="tag is-dark">${j.scale}x</span>
+          <span class="tag is-light">${modelObj.name}</span>
+          <span class="tag is-light">${frames} frames</span>
+          ${j.width ? `<span class="tag is-light">${j.width}×${j.height}</span>` : ''}
+        </div>
+        ${progressBar}
+        ${j.status === 'error' ? `<p class="has-text-danger is-size-7 mt-1">${j.error_msg || ''}</p>` : ''}
+      </div>
+      <div class="buttons are-small ml-3 mt-1" style="flex-shrink:0;">
+        <a class="button is-light" href="/job/${j.id}" title="Ver detalle">
+          <span class="icon"><i class="fas fa-eye"></i></span></a>
+        ${btns}
+        <button class="button is-danger is-light" onclick="deleteJob('${j.id}')" title="Eliminar">
+          <span class="icon"><i class="fas fa-trash"></i></span></button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function buildQueueItem(jid, index, jobMap) {
+  const j = jobMap[jid];
+  if (!j) return '';
+  const frames = (j.end_frame || 0) - (j.start_frame || 0);
+  return `
+  <div class="queue-item box p-3 mb-2" data-id="${j.id}">
+    <div class="is-flex is-justify-content-space-between is-align-items-center">
+      <div>
+        <span class="tag is-dark mr-1">#${index + 1}</span>
+        <strong>${j.original_name.length > 28 ? j.original_name.slice(0,28)+'…' : j.original_name}</strong>
+        <br><small class="has-text-grey">${j.scale}x · ${j.model} · ${frames} frames</small>
+      </div>
+      <div class="buttons are-small">
+        <button class="button is-light" onclick="changePriority('${j.id}','up')">
+          <span class="icon"><i class="fas fa-arrow-up"></i></span></button>
+        <button class="button is-light" onclick="changePriority('${j.id}','down')">
+          <span class="icon"><i class="fas fa-arrow-down"></i></span></button>
+        <button class="button is-warning is-light" onclick="jobAction('${j.id}','pause')">
+          <span class="icon"><i class="fas fa-pause"></i></span></button>
+        <button class="button is-danger is-light" onclick="jobAction('${j.id}','cancel')">
+          <span class="icon"><i class="fas fa-times"></i></span></button>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function jobAction(id, action) {
+  await fetch(`/job/${id}/${action}`, {method: 'POST'});
+}
+async function changePriority(id, dir) {
+  await fetch(`/job/${id}/priority`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({direction: dir})
+  });
+}
+async function deleteJob(id) {
+  if (!confirm('¿Eliminar este trabajo?')) return;
+  await fetch(`/job/${id}/delete`, {method: 'POST'});
+}
+
+// SSE live updates
+const es = new EventSource('/events');
+es.onmessage = (e) => {
+  const data = JSON.parse(e.data);
+  const jobs  = data.jobs || [];
+  const q     = data.queue || [];
+  const active = data.active;
+  const jobMap = {};
+  jobs.forEach(j => jobMap[j.id] = j);
+
+  // Stats
+  document.getElementById('stat-total').textContent = jobs.length;
+  document.getElementById('stat-processing').textContent =
+    jobs.filter(j => j.status === 'processing').length;
+  document.getElementById('stat-queued').textContent =
+    jobs.filter(j => j.status === 'queued').length;
+  document.getElementById('stat-done').textContent =
+    jobs.filter(j => j.status === 'completed').length;
+
+  // Active job
+  const activeSection = document.getElementById('active-section');
+  const activeCard    = document.getElementById('active-card');
+  if (active && jobMap[active]) {
+    activeSection.style.display = '';
+    activeCard.innerHTML = buildJobCard(jobMap[active]);
+  } else {
+    activeSection.style.display = 'none';
+  }
+
+  // Queue
+  const queueEl = document.getElementById('queue-list');
+  document.getElementById('queue-count').textContent = q.length;
+  if (q.length === 0) {
+    queueEl.innerHTML = `<p class="has-text-grey-light has-text-centered py-4">
+      <span class="icon"><i class="fas fa-check-circle"></i></span> Cola vacía</p>`;
+  } else {
+    queueEl.innerHTML = q.map((jid, i) => buildQueueItem(jid, i, jobMap)).join('');
+  }
+
+  // Jobs list
+  const jobsEl = document.getElementById('jobs-list');
+  if (jobs.length === 0) {
+    jobsEl.innerHTML = `<div class="has-text-centered py-6 has-text-grey">
+      <span class="icon is-large"><i class="fas fa-film fa-3x"></i></span>
+      <p class="mt-3">No hay trabajos todavía. <a href="/new">Crear el primero →</a></p></div>`;
+  } else {
+    jobsEl.innerHTML = jobs.map(j => buildJobCard(j)).join('');
+  }
+};
+</script>
+{% endblock %}

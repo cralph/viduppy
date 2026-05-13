@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>{% block title %}VidUpscaler{% endblock %}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+  <link rel="stylesheet" href="/static/css/custom.css"/>
+</head>
+<body>
+
+<!-- Navbar -->
+<nav class="navbar is-dark" role="navigation">
+  <div class="navbar-brand">
+    <a class="navbar-item" href="/">
+      <span class="icon mr-2"><i class="fas fa-film"></i></span>
+      <strong class="has-text-white" style="font-size:1.1rem;">VidUpscaler</strong>
+    </a>
+  </div>
+  <div class="navbar-menu">
+    <div class="navbar-end">
+      <a class="navbar-item has-text-grey-light" href="/">
+        <span class="icon"><i class="fas fa-th-large"></i></span>
+        <span>Dashboard</span>
+      </a>
+      <a class="navbar-item has-text-grey-light" href="/settings">
+        <span class="icon"><i class="fas fa-cog"></i></span>
+        <span>Configuración</span>
+      </a>
+      <div class="navbar-item">
+        <a class="button is-primary is-small" href="/new">
+          <span class="icon"><i class="fas fa-plus"></i></span>
+          <span>Nueva tarea</span>
+        </a>
+      </div>
+    </div>
+  </div>
+</nav>
+
+<!-- Main content -->
+<section class="section">
+  <div class="container is-fluid">
+    {% block content %}{% endblock %}
+  </div>
+</section>
+
+<footer class="footer py-4">
+  <div class="content has-text-centered has-text-grey">
+    <small>VidUpscaler · Upscaling local con Upscayl + FFmpeg</small>
+  </div>
+</footer>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

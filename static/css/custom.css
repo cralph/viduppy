@@ -1,0 +1,181 @@
+/* ── General ─────────────────────────────────────────────────────────────────── */
+body {
+  background-color: #0f0f0f;
+  color: #e0e0e0;
+}
+
+.section {
+  padding-top: 1.5rem;
+  padding-bottom: 1.5rem;
+}
+
+.box {
+  background-color: #1a1a1a;
+  color: #e0e0e0;
+  border: 1px solid #2a2a2a;
+}
+
+.title, .label, .heading {
+  color: #e0e0e0 !important;
+}
+
+.table {
+  background: transparent;
+  color: #c0c0c0;
+}
+.table th { color: #888; }
+.table td { color: #ddd; }
+.table tr:hover td { background-color: #222; }
+
+/* ── Stat boxes ──────────────────────────────────────────────────────────────── */
+.stat-box {
+  text-align: center;
+  border-radius: 8px;
+}
+
+/* ── Drop zone ───────────────────────────────────────────────────────────────── */
+.drop-zone {
+  border: 2px dashed #444;
+  border-radius: 12px;
+  padding: 3rem 2rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .2s, background .2s;
+}
+.drop-zone:hover,
+.drop-zone.is-dragover {
+  border-color: #00d1b2;
+  background: rgba(0, 209, 178, 0.05);
+}
+
+/* ── Timeline ────────────────────────────────────────────────────────────────── */
+.timeline-container {
+  user-select: none;
+}
+
+.thumb-canvas {
+  display: block;
+  width: 100%;
+  height: 48px;
+  border-radius: 4px 4px 0 0;
+  background: #111;
+}
+
+.timeline-bar {
+  position: relative;
+  height: 32px;
+  background: #222;
+  border-radius: 0 0 4px 4px;
+  cursor: crosshair;
+  overflow: visible;
+}
+
+.tl-selected {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: rgba(0, 209, 178, 0.30);
+  border-top: 2px solid #00d1b2;
+  border-bottom: 2px solid #00d1b2;
+  pointer-events: none;
+}
+
+.tl-handle {
+  position: absolute;
+  top: -6px;
+  width: 14px;
+  height: 44px;
+  background: #fff;
+  border: 3px solid #00d1b2;
+  border-radius: 4px;
+  transform: translateX(-50%);
+  cursor: ew-resize;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(0,0,0,.5);
+  transition: background .1s;
+}
+.tl-handle:hover { background: #00d1b2; }
+
+.tl-handle-start { border-color: #48c774; }
+.tl-handle-start:hover { background: #48c774; }
+.tl-handle-end   { border-color: #ffb347; }
+.tl-handle-end:hover { background: #ffb347; }
+
+.tl-playhead {
+  position: absolute;
+  top: -4px;
+  width: 2px;
+  height: 40px;
+  background: #ffdd57;
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 5;
+}
+
+.tl-labels {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  font-size: .75rem;
+  color: #888;
+}
+.tl-label-group {
+  display: flex;
+  gap: 4px;
+  align-items: baseline;
+}
+
+/* ── Queue items ─────────────────────────────────────────────────────────────── */
+.queue-item {
+  border-left: 3px solid #ffdd57;
+  transition: border-color .2s;
+}
+.queue-item:hover { border-color: #00d1b2; }
+
+/* ── Job cards ───────────────────────────────────────────────────────────────── */
+.job-card {
+  border-left: 3px solid #333;
+  transition: border-color .2s;
+}
+.job-card:hover { border-left-color: #00d1b2; }
+
+/* ── Navbar ──────────────────────────────────────────────────────────────────── */
+.navbar.is-dark {
+  background-color: #111 !important;
+  border-bottom: 1px solid #222;
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────────────── */
+.footer {
+  background-color: #0f0f0f;
+  border-top: 1px solid #1e1e1e;
+}
+
+/* ── Notification ────────────────────────────────────────────────────────────── */
+.notification.is-info.is-light {
+  background: rgba(32, 156, 238, 0.12);
+  color: #90d0f8;
+}
+.notification.is-warning.is-light {
+  background: rgba(255, 221, 87, 0.10);
+  color: #ffe08a;
+}
+
+/* ── Progress bar ────────────────────────────────────────────────────────────── */
+progress.progress.is-info {
+  background: #2a2a2a;
+}
+
+/* ── Video preview container ─────────────────────────────────────────────────── */
+.video-preview-container {
+  background: #000;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* ── Tag tweaks ──────────────────────────────────────────────────────────────── */
+.tag.is-dark  { background: #333; color: #ddd; }
+.tag.is-light { background: #2a2a2a; color: #bbb; }
+
+/* ── Scale buttons active ────────────────────────────────────────────────────── */
+.scale-btn { min-width: 52px; }
