@@ -421,28 +421,108 @@ class VideoProcessor:
             finally:
                 shutil.rmtree(subset_dir, ignore_errors=True)
 
-        # ── Strip upscayl suffixes from output filenames ──────────────────────
-        self._log(log_path, 'Post-upscale: normalizing output filenames…')
+        # ── Normalize and sanitize output frame set ───────────────────────────
+        # Some upscayl-bin builds can emit extra variant/tile-like PNGs.
+        # Keep exactly one candidate per frame index, then rebuild a clean
+        # frame_000001.png..frame_%06d.png set for FFmpeg.
+        self._log(log_path, 'Post-upscale: normalizing output frame set…')
+        frame_candidates: dict[int, list[tuple[str, int]]] = {}
+        ignored_pngs = 0
         with os.scandir(upscaled_dir) as scan:
             for entry in scan:
-                if not (entry.is_file() and entry.name.endswith('.png')):
+                if not (entry.is_file() and entry.name.endswith('.png') and not entry.name.startswith('._')):
                     continue
-                if '_upscayl' in entry.name or '_out' in entry.name:
-                    m = _re.match(r'(frame_\d+)', entry.name)
-                    if m:
-                        new_path = os.path.join(upscaled_dir, m.group(1) + '.png')
-                        self._replace_with_retry(entry.path, new_path)
+                m = _re.match(r'^frame_(\d+)', entry.name)
+                if not m:
+                    ignored_pngs += 1
+                    continue
+                idx = int(m.group(1))
+                try:
+                    fsize = entry.stat().st_size
+                except OSError:
+                    fsize = 0
+                frame_candidates.setdefault(idx, []).append((entry.path, fsize))
 
-        # ── Verify frame count ────────────────────────────────────────────────
+        if ignored_pngs:
+            self._log(log_path, f'Ignored {ignored_pngs} non-frame PNG(s) in upscaled_dir.')
+
+        missing = [i for i in range(1, total + 1) if i not in frame_candidates]
+        if missing:
+            sample = ', '.join(str(i) for i in missing[:12])
+            raise RuntimeError(
+                f'Missing upscaled frames after normalization ({len(missing)} missing). '
+                f'First missing indices: {sample}. Check log: {log_path}'
+            )
+
+        chosen_paths: list[tuple[int, str]] = []
+        variant_frames = 0
+        for idx in range(1, total + 1):
+            candidates = frame_candidates[idx]
+            if len(candidates) > 1:
+                variant_frames += 1
+            # Choose the largest candidate (usually the full stitched frame).
+            best_path, _ = max(candidates, key=lambda it: (it[1], it[0]))
+            chosen_paths.append((idx, best_path))
+
+        if variant_frames:
+            self._log(
+                log_path,
+                f'Found multiple PNG variants for {variant_frames} frame index(es); '
+                'selected the largest file per index.',
+            )
+
+        normalized_dir = os.path.join(upscaled_dir, '_normalized_frames')
+        shutil.rmtree(normalized_dir, ignore_errors=True)
+        os.makedirs(normalized_dir, exist_ok=True)
+        try:
+            for idx, src in chosen_paths:
+                dst = os.path.join(normalized_dir, f'frame_{idx:06d}.png')
+                shutil.copy2(src, dst)
+
+            normalized_pngs = sorted(
+                f for f in os.listdir(normalized_dir)
+                if f.endswith('.png') and not f.startswith('._')
+            )
+            if len(normalized_pngs) != total:
+                raise RuntimeError(
+                    f'Normalized frame count mismatch: got {len(normalized_pngs)}, expected {total}.'
+                )
+
+            # Optional sanity check: resolution should be close to source*scale.
+            sample_path = os.path.join(normalized_dir, normalized_pngs[0])
+            probe_w, probe_h = self._probe_image_size(sample_path)
+            exp_w = int(job.get('width', 0) or 0) * int(job.get('scale', 1) or 1)
+            exp_h = int(job.get('height', 0) or 0) * int(job.get('scale', 1) or 1)
+            if probe_w > 0 and probe_h > 0 and exp_w > 0 and exp_h > 0:
+                if abs(probe_w - exp_w) > 16 or abs(probe_h - exp_h) > 16:
+                    self._log(
+                        log_path,
+                        f'WARNING: unexpected upscaled frame size {probe_w}x{probe_h} '
+                        f'(expected around {exp_w}x{exp_h}).',
+                    )
+
+            # Rebuild clean set in upscaled_dir.
+            for path in glob.glob(os.path.join(upscaled_dir, '*.png')):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+            for fname in normalized_pngs:
+                self._replace_with_retry(
+                    os.path.join(normalized_dir, fname),
+                    os.path.join(upscaled_dir, fname),
+                )
+        finally:
+            shutil.rmtree(normalized_dir, ignore_errors=True)
+
         final_pngs = sorted(
             f for f in os.listdir(upscaled_dir)
             if f.endswith('.png') and not f.startswith('._')
         )
-        self._log(log_path, f'After upscaling: {len(final_pngs)} PNGs in upscaled_dir')
-
-        if len(final_pngs) < total:
+        self._log(log_path, f'After normalization: {len(final_pngs)} PNGs in upscaled_dir')
+        if len(final_pngs) != total:
             raise RuntimeError(
-                f'Missing upscaled frames: only {len(final_pngs)} of {total}. '
+                f'Final upscaled frame count mismatch: {len(final_pngs)} vs expected {total}. '
                 f'Check log: {log_path}'
             )
 
@@ -461,14 +541,6 @@ class VideoProcessor:
                 f'Ensure {job["model"]}.param and {job["model"]}.bin exist '
                 f'in the models directory and select a valid model.'
             )
-
-        # ── Normalize to frame_000001.png … for FFmpeg ────────────────────────
-        self._log(log_path, 'Post-upscale: reindexing frames to frame_%06d.png…')
-        for idx, fname in enumerate(final_pngs):
-            src    = os.path.join(upscaled_dir, fname)
-            target = os.path.join(upscaled_dir, f'frame_{idx + 1:06d}.png')
-            if os.path.normcase(src) != os.path.normcase(target):
-                self._replace_with_retry(src, target)
 
         self._log(log_path, f'Upscaling done. {total} frames ready.')
         update_job(job_id, {'stage': 'Frames upscaled, assembling video…', 'progress': 85, 'eta': 0})
@@ -652,6 +724,29 @@ class VideoProcessor:
             capture_output=True, text=True,
         )
         return 'codec_type=audio' in r.stdout
+
+    def _probe_image_size(self, image_path: str) -> tuple[int, int]:
+        ffprobe_exec = config.FFPROBE_BIN or 'ffprobe'
+        try:
+            r = subprocess.run(
+                [
+                    ffprobe_exec, '-v', 'error',
+                    '-select_streams', 'v:0',
+                    '-show_entries', 'stream=width,height',
+                    '-of', 'csv=p=0:s=x',
+                    image_path,
+                ],
+                capture_output=True, text=True, timeout=8,
+            )
+            if r.returncode != 0:
+                return 0, 0
+            txt = (r.stdout or '').strip()
+            if 'x' not in txt:
+                return 0, 0
+            w_s, h_s = txt.split('x', 1)
+            return int(w_s or 0), int(h_s or 0)
+        except Exception:
+            return 0, 0
 
     def _calc_eta(self, frames_remaining: int) -> int:
         if not self._recent_frame_times:
