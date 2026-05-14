@@ -73,12 +73,17 @@ class VideoProcessor:
             use_upscayl = self._should_use_upscayl(job)
             source_dir = frames_dir
             if use_upscayl:
-                self._upscale_frames(job_id, job, frames_dir, upscaled_dir, log_path)
+                upscayl_factor = self._effective_upscayl_factor(job)
+                self._upscale_frames(
+                    job_id, job, frames_dir, upscaled_dir, log_path,
+                    upscayl_factor=upscayl_factor,
+                )
                 if self.queue.should_stop():
                     keep_workdirs = not self.queue.is_cancelled(job_id)
                     return
                 source_dir = upscaled_dir
             else:
+                upscayl_factor = 1
                 out_w, out_h = self._desired_output_size(job)
                 self._log(
                     log_path,
@@ -96,6 +101,7 @@ class VideoProcessor:
                 source_dir,
                 log_path,
                 used_upscayl=use_upscayl,
+                upscayl_factor=upscayl_factor,
                 process_started_at=process_started_at,
                 base_elapsed=base_elapsed,
             )
@@ -189,7 +195,8 @@ class VideoProcessor:
     # ── Step 2 – Upscale frames ───────────────────────────────────────────────
 
     def _upscale_frames(self, job_id: str, job: dict,
-                        frames_dir: str, upscaled_dir: str, log_path: str):
+                        frames_dir: str, upscaled_dir: str, log_path: str,
+                        upscayl_factor: int):
 
         all_frame_names = sorted(
             f for f in os.listdir(frames_dir)
@@ -213,7 +220,15 @@ class VideoProcessor:
         self._log(log_path, f'\n=== UPSCALE FRAMES ({total} frames) ===')
         self._log(log_path, f'binary={config.UPSCAYL_BIN}')
         self._log(log_path, f'models={config.UPSCAYL_MODELS_DIR}')
-        self._log(log_path, f'scale={job["scale"]}  model={job["model"]}')
+        self._log(
+            log_path,
+            f'scale_requested={job["scale"]}  scale_effective={upscayl_factor}  model={job["model"]}',
+        )
+        if int(job.get('scale', 1) or 1) != int(upscayl_factor):
+            self._log(
+                log_path,
+                'Model-native scale override enabled. Final target size will still follow requested output settings.',
+            )
 
         # ── Determine which frames still need upscaling ───────────────────────
         # Strip upscayl suffix (e.g. frame_000001_upscayl_4x_model.png → frame_000001.png)
@@ -228,198 +243,49 @@ class VideoProcessor:
         }
         needed = [f for f in all_frame_names if f not in upscaled_done]
 
+        # On Windows, prefer correctness over resume-cache reuse:
+        # previous corrupted PNGs can be reused and keep producing mosaic output.
+        # Rebuild the upscaled set from scratch.
+        if os.name == 'nt' and upscaled_done:
+            self._log(
+                log_path,
+                'Windows safe mode: ignoring cached upscaled PNGs and rebuilding frame set from scratch.',
+            )
+            for path in glob.glob(os.path.join(upscaled_dir, '*.png')):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+            needed = list(all_frame_names)
+
         if not needed:
             self._log(log_path, 'All frames already upscaled, skipping upscayl-bin.')
         else:
-            # ── Build a subset dir with hard links (or copies) ────────────────
-            # upscayl-bin works reliably with DIRECTORY input, not single files.
-            # This matches the confirmed-working reference implementation.
-            subset_dir = os.path.join(
-                os.path.dirname(frames_dir), f'subset_{job_id[:8]}'
-            )
-            shutil.rmtree(subset_dir, ignore_errors=True)
-            os.makedirs(subset_dir)
-
-            try:
-                for fname in needed:
-                    src = os.path.join(frames_dir, fname)
-                    dst = os.path.join(subset_dir, fname)
-                    try:
-                        os.link(src, dst)       # fast hard link (no extra disk)
-                    except OSError:
-                        shutil.copy2(src, dst)  # fallback: copy
-
-                # ── Resolve models path relative to binary dir ────────────────
-                # Some builds of upscayl-bin prepend their own directory to the
-                # -m argument, so an absolute path like /foo/models becomes
-                # /foo/bin//foo/models (broken). Passing a relative path fixes it.
-                bin_dir = os.path.dirname(os.path.abspath(config.UPSCAYL_BIN))
-                try:
-                    models_arg = os.path.relpath(config.UPSCAYL_MODELS_DIR, bin_dir)
-                except ValueError:
-                    # Windows: relpath fails across drives — fall back to absolute
-                    models_arg = config.UPSCAYL_MODELS_DIR
-                self._log(log_path,
-                    f'bin_dir={bin_dir}  models_abs={config.UPSCAYL_MODELS_DIR}  '
-                    f'models_rel={models_arg}')
-
-                # ── Run upscayl-bin on the whole directory ────────────────────
-                # NOTE: scale flag is -z (not -s) — confirmed from working reference.
-                cmd_base = [
-                    config.UPSCAYL_BIN,
-                    '-i', subset_dir,
-                    '-o', upscaled_dir,
-                    '-m', models_arg,
-                    '-n', job['model'],
-                    '-z', str(job['scale']),
-                    '-f', 'png',
-                ]
-                gpu_flags = self._upscayl_gpu_flags(log_path)
-                cmd_preferred = cmd_base + (gpu_flags or [])
-                cmd_abs_models = [
-                    config.UPSCAYL_BIN,
-                    '-i', subset_dir,
-                    '-o', upscaled_dir,
-                    '-m', config.UPSCAYL_MODELS_DIR,
-                    '-n', job['model'],
-                    '-z', str(job['scale']),
-                    '-f', 'png',
-                ]
-                self._log(log_path, 'CMD: ' + ' '.join(cmd_preferred))
-                update_job(job_id, {
-                    'stage':    f'Upscaling {len(needed)} frames…',
-                    'progress': 12,
-                    'frames_to_process': total,
-                })
-
-                def _run_upscayl(run_cmd: list, label: str):
-                    self._log(log_path, f'CMD [{label}]: ' + ' '.join(run_cmd))
-                    upscayl_log = os.path.join(
-                        config.OUTPUT_FOLDER, f'{job_id}_upscayl_{label}.log'
-                    )
-                    log_f = open(upscayl_log, 'a', encoding='utf-8', errors='replace')
-                    p = subprocess.Popen(
-                        run_cmd,
-                        stdout=log_f,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                    )
-                    # ETA based on real frames processed:
-                    # eta = (elapsed / processed) * remaining
-                    _start_t = time.time()
-                    _start_done = min(total, self._count_pngs(upscaled_dir))
-                    _last_done = -1
-
-                    def _update_from_counts(force: bool = False):
-                        nonlocal _last_done
-                        done = min(total, self._count_pngs(upscaled_dir))
-                        pct  = (done / max(total, 1)) * 100
-                        now  = time.time()
-
-                        if force or done != _last_done:
-                            _last_done = done
-                            overall = 12 + pct * 0.73
-                            processed = max(0, done - _start_done)
-                            remaining = max(0, total - done)
-                            elapsed = max(0.001, now - _start_t)
-                            eta = int((elapsed / processed) * remaining) if processed > 0 else 0
-                            update_job(job_id, {
-                                'stage':         f'Upscaling frames ({done}/{total}) · {pct:.1f}%',
-                                'progress':      round(overall, 1),
-                                'current_frame': done,
-                                'frames_to_process': total,
-                                'eta':           eta,
-                            })
-
-                    _update_from_counts(force=True)
-                    try:
-                        while p.poll() is None:
-                            if self.queue.should_stop():
-                                p.terminate()
-                                try:
-                                    p.wait(timeout=5)
-                                except subprocess.TimeoutExpired:
-                                    p.kill()
-                                    p.wait()
-                                return p, upscayl_log
-                            time.sleep(0.5)
-                            _update_from_counts()
-                    finally:
-                        log_f.close()
-
-                    _update_from_counts(force=True)
-                    p.wait()
-                    self._log(log_path, f'upscayl [{label}] exit_code={p.returncode}')
-                    return p, upscayl_log
-
-                # ── Run upscayl-bin on GPU ────────────────────────────────────────
-                # NOTE: this build of upscayl-bin does NOT support -g -1 (CPU mode).
-                # FORCE_CPU is kept in settings for future compatibility but is a no-op here.
-                if config.FORCE_CPU:
-                    self._log(log_path,
-                        'FORCE_CPU=True but this upscayl-bin build does not support '
-                        '-g -1 (CPU). Running on GPU anyway.')
-
-                proc, upscayl_log = _run_upscayl(cmd_preferred, 'gpu')
-                if self.queue.should_stop():
-                    return
-
-                # Windows access-violation crash can happen after pause/resume on some GPU stacks.
-                # Retry once with default GPU selection (without explicit -g) when possible.
-                if proc.returncode in (3221225477, -1073741819) and gpu_flags:
-                    self._log(
-                        log_path,
-                        f'upscayl-bin exited with access violation ({proc.returncode}). '
-                        'Retrying once without explicit GPU device flags.',
-                    )
-                    time.sleep(1.0)
-                    proc, upscayl_log = _run_upscayl(cmd_base, 'gpu-retry')
-                    if self.queue.should_stop():
-                        return
-
-                # Some Windows setups fail with relative -m "..\\models".
-                # Retry once with absolute models path.
-                if proc.returncode in (3221225477, -1073741819):
-                    self._log(
-                        log_path,
-                        f'upscayl-bin still failing ({proc.returncode}). '
-                        'Retrying once with absolute models path.',
-                    )
-                    time.sleep(1.0)
-                    proc, upscayl_log = _run_upscayl(cmd_abs_models, 'gpu-retry-abs-models')
-                    if self.queue.should_stop():
-                        return
-
-                if proc.returncode != 0:
-                    raise RuntimeError(
-                        self._format_upscayl_failure(
-                            job=job,
-                            return_code=proc.returncode,
-                            upscayl_log=upscayl_log,
-                            main_log=log_path,
-                        )
-                    )
-
-                # Check if GPU silently produced black frames (model not installed)
-                sample_pngs = sorted(
-                    f for f in os.listdir(upscaled_dir)
-                    if f.endswith('.png') and not f.startswith('._')
+            # Windows-safe mode: process each frame independently.
+            # Some upscayl-bin Windows builds can produce tile-mixed outputs in
+            # directory batch mode; per-frame mode is slower but stable.
+            if os.name == 'nt':
+                self._upscale_frames_serial_windows(
+                    job_id=job_id,
+                    job=job,
+                    needed=needed,
+                    total=total,
+                    frames_dir=frames_dir,
+                    upscaled_dir=upscaled_dir,
+                    log_path=log_path,
+                    upscayl_factor=upscayl_factor,
                 )
-                if sample_pngs and self._is_black_frame(
-                        os.path.join(upscaled_dir, sample_pngs[0])):
-                    self._log(log_path,
-                        '⚠ GPU produced black frames. Most likely cause: model '
-                        f'"{job["model"]}" is not installed in the models directory. '
-                        'Verify that both .param and .bin files exist.')
-                    raise RuntimeError(
-                        f'Upscaled frames are black. '
-                        f'Model "{job["model"]}" is likely not installed: '
-                        f'requires {job["model"]}.param and {job["model"]}.bin. '
-                        f'Select an installed model in Settings and retry.'
-                    )
-
-            finally:
-                shutil.rmtree(subset_dir, ignore_errors=True)
+            else:
+                self._upscale_frames_batch_directory(
+                    job_id=job_id,
+                    job=job,
+                    needed=needed,
+                    total=total,
+                    frames_dir=frames_dir,
+                    upscaled_dir=upscaled_dir,
+                    log_path=log_path,
+                    upscayl_factor=upscayl_factor,
+                )
 
         # ── Normalize and sanitize output frame set ───────────────────────────
         # Some upscayl-bin builds can emit extra variant/tile-like PNGs.
@@ -545,10 +411,306 @@ class VideoProcessor:
         self._log(log_path, f'Upscaling done. {total} frames ready.')
         update_job(job_id, {'stage': 'Frames upscaled, assembling video…', 'progress': 85, 'eta': 0})
 
+    def _upscale_frames_batch_directory(self, job_id: str, job: dict, needed: list[str],
+                                        total: int, frames_dir: str, upscaled_dir: str,
+                                        log_path: str, upscayl_factor: int):
+        subset_dir = os.path.join(os.path.dirname(frames_dir), f'subset_{job_id[:8]}')
+        shutil.rmtree(subset_dir, ignore_errors=True)
+        os.makedirs(subset_dir)
+
+        try:
+            for fname in needed:
+                src = os.path.join(frames_dir, fname)
+                dst = os.path.join(subset_dir, fname)
+                try:
+                    os.link(src, dst)
+                except OSError:
+                    shutil.copy2(src, dst)
+
+            bin_dir = os.path.dirname(os.path.abspath(config.UPSCAYL_BIN))
+            try:
+                models_arg = os.path.relpath(config.UPSCAYL_MODELS_DIR, bin_dir)
+            except ValueError:
+                models_arg = config.UPSCAYL_MODELS_DIR
+            self._log(
+                log_path,
+                f'bin_dir={bin_dir}  models_abs={config.UPSCAYL_MODELS_DIR}  models_rel={models_arg}',
+            )
+
+            scale_args = self._upscayl_scale_args(upscayl_factor, log_path)
+            cmd_base = [
+                config.UPSCAYL_BIN,
+                '-i', subset_dir,
+                '-o', upscaled_dir,
+                '-m', models_arg,
+                '-n', job['model'],
+                '-f', 'png',
+            ] + scale_args
+            gpu_flags = self._upscayl_gpu_flags(log_path)
+            cmd_preferred = cmd_base + (gpu_flags or [])
+            cmd_abs_models = [
+                config.UPSCAYL_BIN,
+                '-i', subset_dir,
+                '-o', upscaled_dir,
+                '-m', config.UPSCAYL_MODELS_DIR,
+                '-n', job['model'],
+                '-f', 'png',
+            ] + scale_args
+
+            self._log(log_path, 'CMD: ' + ' '.join(cmd_preferred))
+            update_job(job_id, {
+                'stage': f'Upscaling {len(needed)} frames…',
+                'progress': 12,
+                'frames_to_process': total,
+            })
+
+            def _run_upscayl(run_cmd: list, label: str):
+                self._log(log_path, f'CMD [{label}]: ' + ' '.join(run_cmd))
+                upscayl_log = os.path.join(config.OUTPUT_FOLDER, f'{job_id}_upscayl_{label}.log')
+                log_f = open(upscayl_log, 'a', encoding='utf-8', errors='replace')
+                p = subprocess.Popen(
+                    run_cmd,
+                    stdout=log_f,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+
+                _start_t = time.time()
+                _start_done = min(total, self._count_pngs(upscaled_dir))
+                _last_done = -1
+
+                def _update_from_counts(force: bool = False):
+                    nonlocal _last_done
+                    done = min(total, self._count_pngs(upscaled_dir))
+                    pct = (done / max(total, 1)) * 100
+                    now = time.time()
+                    if force or done != _last_done:
+                        _last_done = done
+                        overall = 12 + pct * 0.73
+                        processed = max(0, done - _start_done)
+                        remaining = max(0, total - done)
+                        elapsed = max(0.001, now - _start_t)
+                        eta = int((elapsed / processed) * remaining) if processed > 0 else 0
+                        update_job(job_id, {
+                            'stage': f'Upscaling frames ({done}/{total}) · {pct:.1f}%',
+                            'progress': round(overall, 1),
+                            'current_frame': done,
+                            'frames_to_process': total,
+                            'eta': eta,
+                        })
+
+                _update_from_counts(force=True)
+                try:
+                    while p.poll() is None:
+                        if self.queue.should_stop():
+                            p.terminate()
+                            try:
+                                p.wait(timeout=5)
+                            except subprocess.TimeoutExpired:
+                                p.kill()
+                                p.wait()
+                            return p, upscayl_log
+                        time.sleep(0.5)
+                        _update_from_counts()
+                finally:
+                    log_f.close()
+
+                _update_from_counts(force=True)
+                p.wait()
+                self._log(log_path, f'upscayl [{label}] exit_code={p.returncode}')
+                return p, upscayl_log
+
+            if config.FORCE_CPU:
+                self._log(
+                    log_path,
+                    'FORCE_CPU=True but this upscayl-bin build does not support -g -1 (CPU). Running on GPU anyway.',
+                )
+
+            proc, upscayl_log = _run_upscayl(cmd_preferred, 'gpu')
+            if self.queue.should_stop():
+                return
+
+            if proc.returncode in (3221225477, -1073741819) and gpu_flags:
+                self._log(
+                    log_path,
+                    f'upscayl-bin exited with access violation ({proc.returncode}). Retrying once without explicit GPU device flags.',
+                )
+                time.sleep(1.0)
+                proc, upscayl_log = _run_upscayl(cmd_base, 'gpu-retry')
+                if self.queue.should_stop():
+                    return
+
+            if proc.returncode in (3221225477, -1073741819):
+                self._log(
+                    log_path,
+                    f'upscayl-bin still failing ({proc.returncode}). Retrying once with absolute models path.',
+                )
+                time.sleep(1.0)
+                proc, upscayl_log = _run_upscayl(cmd_abs_models, 'gpu-retry-abs-models')
+                if self.queue.should_stop():
+                    return
+
+            if proc.returncode != 0:
+                raise RuntimeError(
+                    self._format_upscayl_failure(
+                        job=job,
+                        return_code=proc.returncode,
+                        upscayl_log=upscayl_log,
+                        main_log=log_path,
+                    )
+                )
+        finally:
+            shutil.rmtree(subset_dir, ignore_errors=True)
+
+    def _upscale_frames_serial_windows(self, job_id: str, job: dict, needed: list[str],
+                                       total: int, frames_dir: str, upscaled_dir: str,
+                                       log_path: str, upscayl_factor: int):
+        self._log(
+            log_path,
+            f'Windows safe mode enabled: running upscayl-bin per-frame for {len(needed)} frame(s).',
+        )
+        update_job(job_id, {
+            'stage': f'Upscaling {len(needed)} frames (Windows safe mode)…',
+            'progress': 12,
+            'frames_to_process': total,
+        })
+
+        gpu_flags = self._upscayl_gpu_flags(log_path)
+        bin_dir = os.path.dirname(os.path.abspath(config.UPSCAYL_BIN))
+        try:
+            models_arg = os.path.relpath(config.UPSCAYL_MODELS_DIR, bin_dir)
+        except ValueError:
+            models_arg = config.UPSCAYL_MODELS_DIR
+        self._log(
+            log_path,
+            f'bin_dir={bin_dir}  models_abs={config.UPSCAYL_MODELS_DIR}  models_rel={models_arg}',
+        )
+
+        start_t = time.time()
+        for idx, fname in enumerate(needed, start=1):
+            if self.queue.should_stop():
+                return
+
+            src = os.path.join(frames_dir, fname)
+            dst = os.path.join(upscaled_dir, fname)
+            scale_args = self._upscayl_scale_args(upscayl_factor, log_path)
+            cmd_base = [
+                config.UPSCAYL_BIN,
+                '-i', src,
+                '-o', dst,
+                '-m', models_arg,
+                '-n', job['model'],
+                '-f', 'png',
+            ] + scale_args
+            cmd_preferred = cmd_base + (gpu_flags or [])
+            cmd_abs_models = [
+                config.UPSCAYL_BIN,
+                '-i', src,
+                '-o', dst,
+                '-m', config.UPSCAYL_MODELS_DIR,
+                '-n', job['model'],
+                '-f', 'png',
+            ] + scale_args
+            frame_label = f'frame_{idx:06d}'
+            rc, upscayl_log = self._run_upscayl_once(
+                run_cmd=cmd_preferred,
+                job_id=job_id,
+                label=f'{frame_label}_gpu',
+                log_path=log_path,
+            )
+            if self.queue.should_stop():
+                return
+            if rc in (3221225477, -1073741819) and gpu_flags:
+                self._log(
+                    log_path,
+                    f'[{fname}] access violation ({rc}). Retrying without explicit GPU device flags.',
+                )
+                rc, upscayl_log = self._run_upscayl_once(
+                    run_cmd=cmd_base,
+                    job_id=job_id,
+                    label=f'{frame_label}_gpu_retry',
+                    log_path=log_path,
+                )
+                if self.queue.should_stop():
+                    return
+            if rc in (3221225477, -1073741819):
+                self._log(
+                    log_path,
+                    f'[{fname}] still failing ({rc}). Retrying with absolute models path.',
+                )
+                rc, upscayl_log = self._run_upscayl_once(
+                    run_cmd=cmd_abs_models,
+                    job_id=job_id,
+                    label=f'{frame_label}_gpu_retry_abs_models',
+                    log_path=log_path,
+                )
+                if self.queue.should_stop():
+                    return
+            if rc != 0:
+                raise RuntimeError(
+                    self._format_upscayl_failure(
+                        job=job,
+                        return_code=rc,
+                        upscayl_log=upscayl_log,
+                        main_log=log_path,
+                    )
+                )
+
+            # Some builds ignore output filename and append suffixes.
+            if not os.path.exists(dst):
+                prefix = os.path.splitext(fname)[0]
+                candidates = sorted(
+                    p for p in glob.glob(os.path.join(upscaled_dir, f'{prefix}*.png'))
+                    if os.path.isfile(p)
+                )
+                if candidates:
+                    best = max(candidates, key=lambda p: os.path.getsize(p))
+                    self._replace_with_retry(best, dst)
+
+            done = min(total, self._count_pngs(upscaled_dir))
+            pct = (done / max(total, 1)) * 100
+            overall = 12 + pct * 0.73
+            processed = idx
+            remaining = max(0, len(needed) - idx)
+            elapsed = max(0.001, time.time() - start_t)
+            eta = int((elapsed / processed) * remaining) if processed > 0 else 0
+            update_job(job_id, {
+                'stage': f'Upscaling frames ({done}/{total}) · {pct:.1f}% · Windows safe mode',
+                'progress': round(overall, 1),
+                'current_frame': done,
+                'frames_to_process': total,
+                'eta': eta,
+            })
+
+    def _run_upscayl_once(self, run_cmd: list, job_id: str, label: str,
+                          log_path: str) -> tuple[int, str]:
+        self._log(log_path, f'CMD [{label}]: ' + ' '.join(run_cmd))
+        upscayl_log = os.path.join(config.OUTPUT_FOLDER, f'{job_id}_upscayl_{label}.log')
+        with open(upscayl_log, 'a', encoding='utf-8', errors='replace') as log_f:
+            p = subprocess.Popen(
+                run_cmd,
+                stdout=log_f,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            while p.poll() is None:
+                if self.queue.should_stop():
+                    p.terminate()
+                    try:
+                        p.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        p.kill()
+                        p.wait()
+                    break
+                time.sleep(0.2)
+            p.wait()
+        self._log(log_path, f'upscayl [{label}] exit_code={p.returncode}')
+        return p.returncode, upscayl_log
+
     # ── Step 3 – Reassemble video ─────────────────────────────────────────────
 
     def _assemble_video(self, job_id: str, job: dict, frames_input_dir: str,
-                        log_path: str, used_upscayl: bool,
+                        log_path: str, used_upscayl: bool, upscayl_factor: int,
                         process_started_at: float, base_elapsed: float):
         update_job(job_id, {'stage': 'Assembling final video', 'progress': 87})
         self._log(log_path, '\n=== ASSEMBLE VIDEO ===')
@@ -579,7 +741,7 @@ class VideoProcessor:
         encoder_name = 'h264_nvenc' if use_nvenc else 'libx264'
         self._log(log_path, f'encoder={encoder_name}')
 
-        scale_filter = self._build_output_scale_filter(job, used_upscayl)
+        scale_filter = self._build_output_scale_filter(job, used_upscayl, upscayl_factor)
         if scale_filter:
             self._log(log_path, f'output_scale_filter={scale_filter}')
 
@@ -683,6 +845,34 @@ class VideoProcessor:
         self._log(log_path, f'Using upscayl-bin GPU device {gpu_id} via -g.')
         return ['-g', str(gpu_id)]
 
+    def _upscayl_scale_args(self, factor: int, log_path: str) -> list[str]:
+        """
+        Pick the scale flag supported by this upscayl-bin build.
+        Prefer -s (current CLI), fallback to -z for older builds.
+        """
+        f = max(1, int(factor or 1))
+        if not config.UPSCAYL_BIN:
+            return ['-s', str(f)]
+        try:
+            r = subprocess.run(
+                [config.UPSCAYL_BIN, '--help'],
+                capture_output=True, text=True, timeout=8,
+            )
+            help_text = (r.stdout or '') + (r.stderr or '')
+        except Exception as exc:
+            self._log(log_path, f'Could not inspect upscayl-bin scale flag: {exc}')
+            return ['-s', str(f)]
+
+        has_s = bool(_re.search(r'(^|\s)-s([,\s]|$)|scale', help_text, _re.I))
+        has_z = bool(_re.search(r'(^|\s)-z([,\s]|$)', help_text, _re.I))
+        if has_s:
+            return ['-s', str(f)]
+        if has_z:
+            return ['-z', str(f)]
+
+        # Safe default for modern upscayl-bin.
+        return ['-s', str(f)]
+
     def _is_black_frame(self, png_path: str) -> bool:
         """Downscale PNG to 1×1 via ffmpeg and check if average colour is near black."""
         ffmpeg_exec = config.FFMPEG_BIN or 'ffmpeg'
@@ -758,15 +948,15 @@ class VideoProcessor:
         """Count PNG files with shell-equivalent semantics: ls <dir>/*.png | wc -l."""
         return len(glob.glob(os.path.join(directory, '*.png')))
 
-    def _build_output_scale_filter(self, job: dict, used_upscayl: bool) -> str:
+    def _build_output_scale_filter(self, job: dict, used_upscayl: bool,
+                                   upscayl_factor: int) -> str:
         """Build optional FFmpeg scale filter for final output sizing."""
         out_w, out_h = self._desired_output_size(job)
         in_w = int(job.get('width', 0) or 0)
         in_h = int(job.get('height', 0) or 0)
         if used_upscayl:
-            scale = max(1, int(job.get('scale', 1) or 1))
-            in_w *= scale
-            in_h *= scale
+            in_w *= max(1, int(upscayl_factor or 1))
+            in_h *= max(1, int(upscayl_factor or 1))
 
         if out_w > 0 and out_h > 0 and (out_w != in_w or out_h != in_h):
             return f'scale={out_w}:{out_h}'
@@ -812,6 +1002,22 @@ class VideoProcessor:
         if src_w <= 0 or src_h <= 0 or out_w <= 0 or out_h <= 0:
             return True
         return out_w > src_w or out_h > src_h
+
+    def _effective_upscayl_factor(self, job: dict) -> int:
+        """
+        Derive the upscayl model's native factor from its name.
+        Many default models are x4-only; requesting x2/x3 on those can be unstable.
+        """
+        requested = max(1, int(job.get('scale', 1) or 1))
+        model = str(job.get('model', '') or '').lower()
+
+        if 'x4' in model or '4x' in model:
+            return 4
+        if 'x3' in model or '3x' in model:
+            return 3
+        if 'x2' in model or '2x' in model:
+            return 2
+        return requested
 
     def _output_suffix(self, job: dict) -> str:
         target_w = int(job.get('target_width', 0) or 0)
