@@ -64,6 +64,31 @@ button{font-family:var(--sans)}
 /* Video Player */
 .video-player-wrap{position:relative;border-radius:10px;overflow:hidden;background:#000;aspect-ratio:16/9}
 .video-player-wrap video{width:100%;height:100%;object-fit:contain}
+.frame-preview-tools{margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.frame-preview-btn{background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:8px 12px;border-radius:8px;font-size:12px;cursor:pointer}
+.frame-preview-btn:hover{border-color:var(--accent);color:var(--accent)}
+.frame-preview-btn:disabled{opacity:.55;cursor:not-allowed}
+.frame-preview-note{font-size:11px;color:var(--text3)}
+.frame-preview-status{font-size:11px;color:var(--text2);font-family:var(--mono)}
+.frame-compare-wrap{margin-top:10px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px}
+.frame-compare-stage{position:relative;border-radius:8px;overflow:hidden;background:#000;aspect-ratio:16/9;cursor:ew-resize;touch-action:none}
+.frame-compare-stage img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+.frame-compare-overlay{clip-path:inset(0 0 0 50%)}
+.frame-compare-divider{position:absolute;top:0;bottom:0;left:50%;width:2px;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,.35);pointer-events:none}
+.frame-compare-divider::after{content:'';position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:16px;height:16px;border-radius:50%;background:#fff;border:2px solid #000}
+.frame-compare-label{position:absolute;top:8px;padding:3px 8px;border-radius:99px;font-size:10px;font-family:var(--mono);background:rgba(0,0,0,.6);color:#fff}
+.frame-compare-label.left{left:8px}
+.frame-compare-label.right{right:8px}
+.frame-compare-actions{display:flex;justify-content:flex-end;margin-top:8px}
+.frame-compare-fs-btn{background:var(--bg3);border:1px solid var(--border2);color:var(--text2);padding:6px 10px;border-radius:8px;font-size:11px;cursor:pointer}
+.frame-compare-fs-btn:hover{border-color:var(--accent);color:var(--accent)}
+.frame-compare-stage:fullscreen,
+.frame-compare-stage:-webkit-full-screen{
+  aspect-ratio:auto;
+  width:100vw;
+  height:100vh;
+  border-radius:0;
+}
 
 /* Timeline */
 .timeline-wrap{margin-top:14px;user-select:none}
@@ -266,6 +291,7 @@ button{font-family:var(--sans)}
   .job-header{flex-direction:column;gap:9px}
   .job-thumb{width:100%;height:132px}
   .job-actions{flex-wrap:wrap}
+  .frame-preview-tools{flex-direction:column;align-items:flex-start}
   .modal-bg{padding:10px}
   .modal{padding:14px}
   .toast-container{left:10px;right:10px;bottom:10px}
@@ -407,6 +433,24 @@ button{font-family:var(--sans)}
           Output resolution: <strong id="outRes">—</strong>
           <span style="margin-left:8px;color:var(--text3)">·</span>
           <span style="margin-left:8px;color:var(--text3)">Clip: <strong id="clipDur">—</strong></span>
+        </div>
+
+        <div class="frame-preview-tools">
+          <button class="frame-preview-btn" id="framePreviewBtn" onclick="generateFramePreview()" data-i18n="preview.generate">Generate frame preview</button>
+          <span class="frame-preview-note" data-i18n="preview.note">On-demand only. Uses current model and output settings.</span>
+          <span class="frame-preview-status" id="framePreviewStatus"></span>
+        </div>
+        <div class="frame-compare-wrap" id="frameCompareWrap" style="display:none">
+          <div class="frame-compare-stage" id="frameCompareStage">
+            <img id="frameCompareOrig" alt="Original frame preview">
+            <img id="frameCompareUpscaled" class="frame-compare-overlay" alt="Upscaled frame preview">
+            <div class="frame-compare-divider" id="frameCompareDivider"></div>
+            <div class="frame-compare-label left" data-i18n="preview.original">Original</div>
+            <div class="frame-compare-label right" data-i18n="preview.upscaled">Upscaled</div>
+          </div>
+          <div class="frame-compare-actions">
+            <button class="frame-compare-fs-btn" onclick="openFrameCompareFullscreen()" data-i18n="preview.fullscreen">Fullscreen compare</button>
+          </div>
         </div>
 
         <div class="control-group" style="margin-top:10px">
@@ -632,6 +676,14 @@ const I18N = {
     'jobs.total_processing': 'processing time',
     'timeline.clip': 'Clip',
     'timeline.all_frames': 'All frames',
+    'preview.generate': 'Generate frame preview',
+    'preview.note': 'On-demand only. Uses current model and output settings.',
+    'preview.original': 'Original',
+    'preview.upscaled': 'Upscaled',
+    'preview.generating': 'Generating frame preview...',
+    'preview.ready': 'Frame preview ready at {time}.',
+    'preview.error': 'Preview failed',
+    'preview.fullscreen': 'Fullscreen compare',
     'jobs.elapsed_title': 'Elapsed time',
     'jobs.eta_title': 'Estimated time remaining',
     'jobs.remaining': 'remaining',
@@ -663,6 +715,14 @@ const I18N = {
     'jobs.total_processing': 'tiempo de procesamiento',
     'timeline.clip': 'Clip',
     'timeline.all_frames': 'Todos los frames',
+    'preview.generate': 'Generar preview de frame',
+    'preview.note': 'Solo bajo demanda. Usa el modelo y configuración de salida actuales.',
+    'preview.original': 'Original',
+    'preview.upscaled': 'Upscaled',
+    'preview.generating': 'Generando preview del frame...',
+    'preview.ready': 'Preview listo en {time}.',
+    'preview.error': 'Falló el preview',
+    'preview.fullscreen': 'Comparar en pantalla completa',
     'jobs.elapsed_title': 'Tiempo transcurrido',
     'jobs.eta_title': 'Tiempo restante estimado',
     'jobs.remaining': 'restante',
@@ -732,6 +792,9 @@ let outputJobId   = null;
 let outputFactor  = 1.0;
 let targetWidth   = 0;
 let targetHeight  = 0;
+let framePreviewBusy = false;
+let frameComparePct = 50;
+let activeCompareStage = null;
 
 // ── Clock ─────────────────────────────────────────────────────────────────────
 setInterval(() => {
@@ -739,6 +802,32 @@ setInterval(() => {
   refreshLiveTimers();
   updateSidebar(activeJobId);
 }, 1000);
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.fullscreenElement) {
+    document.exitFullscreen?.();
+  }
+});
+
+if (window.PointerEvent) {
+  document.addEventListener('pointermove', (evt) => {
+    if (!activeCompareStage) return;
+    updateFrameCompareSplit(comparePctFromPointer(activeCompareStage, evt));
+  });
+  document.addEventListener('pointerup', () => { activeCompareStage = null; });
+} else {
+  document.addEventListener('mousemove', (evt) => {
+    if (!activeCompareStage) return;
+    updateFrameCompareSplit(comparePctFromPointer(activeCompareStage, evt));
+  });
+  document.addEventListener('mouseup', () => { activeCompareStage = null; });
+  document.addEventListener('touchmove', (evt) => {
+    if (!activeCompareStage) return;
+    updateFrameCompareSplit(comparePctFromPointer(activeCompareStage, evt));
+    if (evt.cancelable) evt.preventDefault();
+  }, { passive: false });
+  document.addEventListener('touchend', () => { activeCompareStage = null; });
+}
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
 function toast(msg, type = 'info') {
@@ -789,18 +878,21 @@ async function loadModels() {
   } catch(e) { console.error('loadModels', e); }
 }
 loadModels();
+initCompareInteractions();
 
 function selectScale(s) {
   selectedScale = s;
   document.querySelectorAll('#scaleGrid .scale-btn').forEach(b =>
     b.classList.toggle('active', parseInt(b.dataset.scale) === s));
   updateOutputEstimate();
+  clearFramePreview();
 }
 
 function selectModel(id, el) {
   selectedModel = id;
   document.querySelectorAll('.model-btn').forEach(b => b.classList.remove('active'));
   el.classList.add('active');
+  clearFramePreview();
 }
 
 // ── Upload ────────────────────────────────────────────────────────────────────
@@ -845,6 +937,7 @@ async function handleFile(file) {
 }
 
 function setupVideoPreview(d) {
+  clearFramePreview();
   document.getElementById('uploadProgress').style.display = 'none';
   document.getElementById('uploadSection').style.display = 'none';
   document.getElementById('videoPreviewWrap').style.display = 'block';
@@ -968,8 +1061,129 @@ function updateOutputEstimate() {
   document.getElementById('clipDur').textContent = fmtClock(clipSec);
 }
 
+function updateFrameCompareSplit(value) {
+  const pct = Math.max(0, Math.min(100, parseInt(value, 10) || 0));
+  frameComparePct = pct;
+  const overlay = document.getElementById('frameCompareUpscaled');
+  const divider = document.getElementById('frameCompareDivider');
+  if (overlay) overlay.style.clipPath = `inset(0 0 0 ${pct}%)`;
+  if (divider) divider.style.left = `${pct}%`;
+}
+
+function comparePctFromPointer(stageEl, evt) {
+  const rect = stageEl.getBoundingClientRect();
+  const clientX = (evt.touches && evt.touches[0])
+    ? evt.touches[0].clientX
+    : evt.clientX;
+  const x = Math.max(0, Math.min(rect.width, clientX - rect.left));
+  return Math.round((x / Math.max(rect.width, 1)) * 100);
+}
+
+function bindCompareStage(stageEl) {
+  if (!stageEl || stageEl.dataset.boundCompare === '1') return;
+  stageEl.dataset.boundCompare = '1';
+
+  const startDrag = (evt) => {
+    activeCompareStage = stageEl;
+    updateFrameCompareSplit(comparePctFromPointer(stageEl, evt));
+    if (evt.cancelable) evt.preventDefault();
+  };
+
+  if (window.PointerEvent) {
+    stageEl.addEventListener('pointerdown', startDrag);
+  } else {
+    stageEl.addEventListener('mousedown', startDrag);
+    stageEl.addEventListener('touchstart', startDrag, { passive: false });
+  }
+}
+
+function initCompareInteractions() {
+  bindCompareStage(document.getElementById('frameCompareStage'));
+}
+
+function clearFramePreview() {
+  const wrap = document.getElementById('frameCompareWrap');
+  const status = document.getElementById('framePreviewStatus');
+  if (wrap) wrap.style.display = 'none';
+  if (status) status.textContent = '';
+}
+
+function openFrameCompareFullscreen() {
+  const stage = document.getElementById('frameCompareStage');
+  const imgOrig = document.getElementById('frameCompareOrig');
+  const imgUp = document.getElementById('frameCompareUpscaled');
+  if (!stage || !imgOrig?.src || !imgUp?.src) return;
+  if (stage.requestFullscreen) stage.requestFullscreen();
+  else if (stage.webkitRequestFullscreen) stage.webkitRequestFullscreen();
+  updateFrameCompareSplit(frameComparePct);
+}
+
+function currentPreviewTimeSec() {
+  const vid = document.getElementById('mainVideo');
+  const fromVideo = vid && Number.isFinite(vid.currentTime) ? vid.currentTime : 0;
+  if (fromVideo > 0) return fromVideo;
+  if (videoData && videoData.duration > 0) return rangeStartPct * videoData.duration;
+  return 0;
+}
+
+async function generateFramePreview() {
+  if (!videoData || !videoData.filepath) return;
+  if (!selectedModel) { toast(t('jobs.no_model_selected'), 'error'); return; }
+  if (framePreviewBusy) return;
+
+  const btn = document.getElementById('framePreviewBtn');
+  const status = document.getElementById('framePreviewStatus');
+  framePreviewBusy = true;
+  btn.disabled = true;
+  status.textContent = t('preview.generating');
+
+  try {
+    const payload = {
+      job_id: videoData.job_id,
+      filepath: videoData.filepath,
+      time_sec: currentPreviewTimeSec(),
+      model: selectedModel,
+      scale: selectedScale,
+      width: videoData.width,
+      height: videoData.height,
+      duration: videoData.duration,
+      output_factor: outputFactor,
+      target_width: targetWidth,
+      target_height: targetHeight,
+    };
+
+    const r = await fetch('/api/preview/frame', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) {
+      toast(`${t('preview.error')}: ${d.error || 'unknown error'}`, 'error');
+      status.textContent = d.error || t('preview.error');
+      return;
+    }
+
+    const imgOrig = document.getElementById('frameCompareOrig');
+    const imgUp = document.getElementById('frameCompareUpscaled');
+    imgOrig.src = d.original_url;
+    imgUp.src = d.upscaled_url;
+    document.getElementById('frameCompareWrap').style.display = 'block';
+    frameComparePct = 50;
+    updateFrameCompareSplit(50);
+    status.textContent = t('preview.ready', { time: fmtClock(d.time_sec || 0) });
+  } catch (e) {
+    toast(`${t('preview.error')}: ${e}`, 'error');
+    status.textContent = t('preview.error');
+  } finally {
+    framePreviewBusy = false;
+    btn.disabled = false;
+  }
+}
+
 function resetUpload() {
   videoData = null;
+  clearFramePreview();
   outputFactor = 1.0;
   targetWidth = 0;
   targetHeight = 0;
@@ -1573,9 +1787,9 @@ function fmtETA(sec) {
 }
 function fmtFrames(n) { return (n ?? '?').toLocaleString(); }
 
-document.getElementById('outFactorInp').addEventListener('input', updateOutputEstimate);
-document.getElementById('outWidthInp').addEventListener('input', updateOutputEstimate);
-document.getElementById('outHeightInp').addEventListener('input', updateOutputEstimate);
+document.getElementById('outFactorInp').addEventListener('input', () => { updateOutputEstimate(); clearFramePreview(); });
+document.getElementById('outWidthInp').addEventListener('input', () => { updateOutputEstimate(); clearFramePreview(); });
+document.getElementById('outHeightInp').addEventListener('input', () => { updateOutputEstimate(); clearFramePreview(); });
 
 /** Returns total elapsed seconds for a job, including any accumulated before pauses. */
 function getElapsed(job) {

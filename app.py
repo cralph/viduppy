@@ -1,6 +1,7 @@
 import json
 import os
 import platform
+import re
 import subprocess
 import threading
 import time
@@ -23,6 +24,7 @@ app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024 * 1024  # 20 GB
 queue   = QueueManager()
 proc    = VideoProcessor(queue)
 worker  = threading.Thread(target=proc.run, daemon=True)
+FRAME_PREVIEW_DIR = os.path.join(config.OUTPUT_FOLDER, 'frame_previews')
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -62,6 +64,42 @@ def _video_info(filepath: str) -> dict:
         'width':        int(vstrm.get('width', 0)),
         'height':       int(vstrm.get('height', 0)),
     }
+
+
+def _run_cmd_capture(cmd: list[str]) -> tuple[int, str]:
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    out = (r.stdout or '') + '\n' + (r.stderr or '')
+    return r.returncode, out.strip()
+
+
+def _cleanup_preview_cache(max_files: int = 120):
+    try:
+        if not os.path.isdir(FRAME_PREVIEW_DIR):
+            return
+        files = []
+        for name in os.listdir(FRAME_PREVIEW_DIR):
+            path = os.path.join(FRAME_PREVIEW_DIR, name)
+            if os.path.isfile(path):
+                files.append(path)
+        if len(files) <= max_files:
+            return
+        files.sort(key=lambda p: os.path.getmtime(p))
+        for p in files[:-max_files]:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+
+def _is_safe_uploaded_path(filepath: str) -> bool:
+    try:
+        file_abs = os.path.normcase(os.path.abspath(filepath))
+        uploads_abs = os.path.normcase(os.path.abspath(config.UPLOAD_FOLDER))
+        return file_abs.startswith(uploads_abs + os.sep)
+    except Exception:
+        return False
 
 
 # ── Pages ─────────────────────────────────────────────────────────────────────
@@ -445,6 +483,172 @@ def preview_output(job_id):
     if not job or not job.get('output_path'):
         return 'Not found', 404
     return send_file(job['output_path'])
+
+
+@app.route('/api/preview/frame', methods=['POST'])
+def preview_frame():
+    d = request.json or {}
+    filepath = config._normalize_path(d.get('filepath', ''))
+    if not filepath or not os.path.isfile(filepath):
+        return jsonify({'error': 'Video file not found for preview.'}), 404
+    if not _is_safe_uploaded_path(filepath):
+        return jsonify({'error': 'Invalid preview file path.'}), 400
+
+    model = str(d.get('model', '') or '').strip()
+    if not model:
+        return jsonify({'error': 'Missing model for preview.'}), 400
+    if not config.UPSCAYL_BIN or not os.path.isfile(config.UPSCAYL_BIN):
+        return jsonify({'error': 'Upscayl binary not configured.'}), 400
+    if not config.UPSCAYL_MODELS_DIR or not os.path.isdir(config.UPSCAYL_MODELS_DIR):
+        return jsonify({'error': 'Upscayl models directory not configured.'}), 400
+    if not proc._model_is_installed(model):
+        installed = ', '.join(proc._list_installed_models()[:12]) or '(none)'
+        return jsonify({
+            'error': f'Model "{model}" is not installed. Installed models: {installed}'
+        }), 400
+
+    try:
+        scale = max(1, int(d.get('scale', 2)))
+        duration = max(0.0, float(d.get('duration', 0) or 0))
+        time_sec = max(0.0, float(d.get('time_sec', 0) or 0))
+        if duration > 0:
+            time_sec = min(time_sec, duration)
+        width = max(0, int(d.get('width', 0) or 0))
+        height = max(0, int(d.get('height', 0) or 0))
+        output_factor = float(d.get('output_factor', 1.0) or 1.0)
+        if output_factor <= 0:
+            output_factor = 1.0
+        target_width = max(0, int(d.get('target_width', 0) or 0))
+        target_height = max(0, int(d.get('target_height', 0) or 0))
+    except Exception:
+        return jsonify({'error': 'Invalid preview parameters.'}), 400
+
+    job_like = {
+        'scale': scale,
+        'model': model,
+        'width': width,
+        'height': height,
+        'output_factor': output_factor,
+        'target_width': target_width,
+        'target_height': target_height,
+    }
+    upscayl_factor = proc._effective_upscayl_factor(job_like)
+    target_w, target_h = proc._desired_output_size(job_like)
+
+    os.makedirs(FRAME_PREVIEW_DIR, exist_ok=True)
+    token = uuid.uuid4().hex[:12]
+    orig_path = os.path.join(FRAME_PREVIEW_DIR, f'{token}_orig.png')
+    up_raw_path = os.path.join(FRAME_PREVIEW_DIR, f'{token}_up_raw.png')
+    up_path = os.path.join(FRAME_PREVIEW_DIR, f'{token}_up.png')
+    log_path = os.path.join(FRAME_PREVIEW_DIR, f'{token}.log')
+
+    ffmpeg_exec = config.FFMPEG_BIN or 'ffmpeg'
+    extract_cmd = [
+        ffmpeg_exec, '-y',
+        '-ss', f'{time_sec:.4f}',
+        '-i', filepath,
+        '-frames:v', '1',
+        orig_path,
+    ]
+    rc, out = _run_cmd_capture(extract_cmd)
+    if rc != 0 or not os.path.isfile(orig_path):
+        return jsonify({
+            'error': f'Could not extract frame at {time_sec:.3f}s.',
+            'details': out[-500:],
+        }), 500
+
+    scale_args = proc._upscayl_scale_args(upscayl_factor, log_path)
+    gpu_flags = proc._upscayl_gpu_flags(log_path)
+    cmd_base = [
+        config.UPSCAYL_BIN,
+        '-i', orig_path,
+        '-o', up_raw_path,
+        '-m', config.UPSCAYL_MODELS_DIR,
+        '-n', model,
+        '-f', 'png',
+    ] + scale_args
+    cmd_preferred = cmd_base + (gpu_flags or [])
+
+    def _run_up_cmd(cmd: list[str]) -> tuple[int, str]:
+        rc_local, txt = _run_cmd_capture(cmd)
+        try:
+            with open(log_path, 'a', encoding='utf-8', errors='replace') as f:
+                f.write('CMD: ' + ' '.join(cmd) + '\n')
+                f.write(f'RC: {rc_local}\n')
+                if txt:
+                    f.write(txt[-1200:] + '\n')
+        except Exception:
+            pass
+        return rc_local, txt
+
+    rc, out = _run_up_cmd(cmd_preferred)
+    if rc in (3221225477, -1073741819) and gpu_flags:
+        rc, out = _run_up_cmd(cmd_base)
+    if rc != 0:
+        return jsonify({
+            'error': f'Upscayl preview failed (code {rc}).',
+            'details': out[-500:],
+        }), 500
+
+    if not os.path.isfile(up_raw_path):
+        prefix = os.path.splitext(os.path.basename(orig_path))[0]
+        cands = sorted(
+            p for p in os.listdir(FRAME_PREVIEW_DIR)
+            if p.startswith(prefix) and p.endswith('.png') and p != os.path.basename(orig_path)
+        )
+        if cands:
+            best = max(
+                (os.path.join(FRAME_PREVIEW_DIR, c) for c in cands),
+                key=lambda p: os.path.getsize(p),
+            )
+            try:
+                os.replace(best, up_raw_path)
+            except OSError:
+                pass
+
+    if not os.path.isfile(up_raw_path):
+        return jsonify({'error': 'Upscayl preview output was not created.'}), 500
+
+    # Match expected final dimensions if current upscaled frame differs.
+    probe_w, probe_h = proc._probe_image_size(up_raw_path)
+    if target_w > 0 and target_h > 0 and (probe_w != target_w or probe_h != target_h):
+        resize_cmd = [
+            ffmpeg_exec, '-y',
+            '-i', up_raw_path,
+            '-vf', f'scale={target_w}:{target_h}',
+            up_path,
+        ]
+        rc, out = _run_cmd_capture(resize_cmd)
+        if rc != 0 or not os.path.isfile(up_path):
+            return jsonify({
+                'error': 'Could not resize preview frame to final dimensions.',
+                'details': out[-500:],
+            }), 500
+    else:
+        up_path = up_raw_path
+
+    orig_file = os.path.basename(orig_path)
+    up_file = os.path.basename(up_path)
+    _cleanup_preview_cache()
+    return jsonify({
+        'ok': True,
+        'preview_id': token,
+        'original_url': f'/api/preview/frame-file/{orig_file}?v={int(time.time())}',
+        'upscaled_url': f'/api/preview/frame-file/{up_file}?v={int(time.time())}',
+        'time_sec': round(time_sec, 3),
+        'effective_scale': upscayl_factor,
+    })
+
+
+@app.route('/api/preview/frame-file/<filename>')
+def preview_frame_file(filename):
+    safe = os.path.basename(filename)
+    if not re.match(r'^[a-f0-9]{12}_(orig|up|up_raw)\.png$', safe):
+        return 'Not found', 404
+    path = os.path.join(FRAME_PREVIEW_DIR, safe)
+    if not os.path.isfile(path):
+        return 'Not found', 404
+    return send_file(path, mimetype='image/png', conditional=False, max_age=0)
 
 
 # ── Settings ─────────────────────────────────────────────────────────────────
