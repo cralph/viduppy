@@ -393,7 +393,7 @@ button{font-family:var(--sans)}
       <!-- Status -->
       <div style="background:var(--bg2);border:1px solid var(--border);border-radius:11px;padding:16px;margin-bottom:20px">
         <div style="font-size:12px;color:var(--text3);font-family:var(--mono);margin-bottom:10px">CURRENT STATUS</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px" id="settingsStatus">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px" id="settingsStatus">
           <div>
             <div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:4px">BINARY</div>
             <div id="statusBin" class="status-bad">Not detected</div>
@@ -401,6 +401,10 @@ button{font-family:var(--sans)}
           <div>
             <div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:4px">MODELS DIR</div>
             <div id="statusModels" class="status-bad">Not detected</div>
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:4px">FFMPEG</div>
+            <div id="statusFfmpeg" class="status-bad">Not detected</div>
           </div>
         </div>
       </div>
@@ -473,6 +477,10 @@ button{font-family:var(--sans)}
       <div class="setting-row">
         <label>Models directory</label>
         <input class="setting-input" id="inp-models" type="text" placeholder="/Applications/Upscayl.app/Contents/Resources/models">
+      </div>
+      <div class="setting-row">
+        <label>FFmpeg path</label>
+        <input class="setting-input" id="inp-ffmpeg" type="text" placeholder="C:\ffmpeg\bin\ffmpeg.exe">
       </div>
 
       <div id="settingsError" style="display:none;background:rgba(255,87,87,.1);border:1px solid rgba(255,87,87,.3);border-radius:7px;padding:10px 12px;font-size:12px;color:var(--red);margin-bottom:12px"></div>
@@ -1087,26 +1095,41 @@ async function loadSettingsUI() {
     // Use detect response to show current state
     const binEl    = document.getElementById('statusBin');
     const modelsEl = document.getElementById('statusModels');
+    const ffmpegEl = document.getElementById('statusFfmpeg');
+    const binPath = d.current_upscayl_bin || d.upscayl_bin;
+    const modelsPath = d.current_upscayl_models_dir || d.upscayl_models_dir;
+    const ffmpegPath = d.current_ffmpeg_bin || d.ffmpeg_bin;
 
-    if (d.upscayl_bin) {
+    if (binPath) {
       binEl.className = 'status-ok';
       binEl.textContent = '✓ ' + d.upscayl_bin;
-      document.getElementById('inp-bin').placeholder = d.upscayl_bin;
+      document.getElementById('inp-bin').placeholder = binPath;
+      binEl.textContent = 'OK ' + binPath;
     } else {
       binEl.className = 'status-bad';
       binEl.textContent = '✗ Not found';
     }
-    if (d.upscayl_models_dir) {
+    if (modelsPath) {
       modelsEl.className = 'status-ok';
       modelsEl.textContent = '✓ ' + d.upscayl_models_dir;
-      document.getElementById('inp-models').placeholder = d.upscayl_models_dir;
+      document.getElementById('inp-models').placeholder = modelsPath;
+      modelsEl.textContent = 'OK ' + modelsPath;
     } else {
       modelsEl.className = 'status-bad';
       modelsEl.textContent = '✗ Not found';
     }
 
+    if (ffmpegPath) {
+      ffmpegEl.className = 'status-ok';
+      ffmpegEl.textContent = 'OK ' + ffmpegPath;
+      document.getElementById('inp-ffmpeg').placeholder = ffmpegPath;
+    } else {
+      ffmpegEl.className = 'status-bad';
+      ffmpegEl.textContent = 'Not found';
+    }
+
     document.getElementById('settingsWarn').style.display =
-      (!d.upscayl_bin || !d.upscayl_models_dir) ? '' : 'none';
+      (!binPath || !modelsPath || !ffmpegPath) ? '' : 'none';
   } catch(e) {}
 }
 
@@ -1117,6 +1140,7 @@ async function autoDetect() {
     const d = await r.json();
     if (d.upscayl_bin)        document.getElementById('inp-bin').value    = d.upscayl_bin;
     if (d.upscayl_models_dir) document.getElementById('inp-models').value = d.upscayl_models_dir;
+    if (d.ffmpeg_bin)         document.getElementById('inp-ffmpeg').value = d.ffmpeg_bin;
     toast(d.upscayl_bin ? 'Binary detected ✓' : 'Binary not found — enter path manually', d.upscayl_bin ? 'success' : 'error');
     loadSettingsUI();
   } finally {
@@ -1127,6 +1151,7 @@ async function autoDetect() {
 async function saveSettings() {
   const bin    = document.getElementById('inp-bin').value.trim();
   const models = document.getElementById('inp-models').value.trim();
+  const ffmpeg = document.getElementById('inp-ffmpeg').value.trim();
   const btn    = document.getElementById('btnSave');
   btn.textContent = 'Saving…';
 
@@ -1136,7 +1161,7 @@ async function saveSettings() {
   try {
     const r = await fetch('/settings/save', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ upscayl_bin: bin, upscayl_models_dir: models }),
+      body: JSON.stringify({ upscayl_bin: bin, upscayl_models_dir: models, ffmpeg_bin: ffmpeg }),
     });
     const d = await r.json();
     if (d.ok) {
@@ -1158,6 +1183,7 @@ function clearSettings() {
   if (!confirm('Clear saved configuration?')) return;
   document.getElementById('inp-bin').value    = '';
   document.getElementById('inp-models').value = '';
+  document.getElementById('inp-ffmpeg').value = '';
   saveSettings();
 }
 
@@ -1325,6 +1351,7 @@ const _origSaveSettings = saveSettings;
 saveSettings = async function() {
   const bin    = document.getElementById('inp-bin').value.trim();
   const models = document.getElementById('inp-models').value.trim();
+  const ffmpeg = document.getElementById('inp-ffmpeg').value.trim();
   const btn    = document.getElementById('btnSave');
   btn.textContent = 'Saving…';
 
@@ -1337,6 +1364,7 @@ saveSettings = async function() {
       body: JSON.stringify({
         upscayl_bin:        bin,
         upscayl_models_dir: models,
+        ffmpeg_bin:         ffmpeg,
         use_nvenc:          nvencEnabled,
         gpu_device:         selectedGPU,
         force_cpu:          forceCPU,

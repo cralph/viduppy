@@ -1,5 +1,6 @@
 import json
 import os
+import platform
 import subprocess
 import threading
 import time
@@ -27,8 +28,9 @@ worker  = threading.Thread(target=proc.run, daemon=True)
 
 def _probe(filepath: str) -> dict:
     """Run ffprobe and return parsed JSON."""
+    ffprobe_exec = config.FFPROBE_BIN or 'ffprobe'
     r = subprocess.run(
-        ['ffprobe', '-v', 'quiet', '-print_format', 'json',
+        [ffprobe_exec, '-v', 'quiet', '-print_format', 'json',
          '-show_streams', '-show_format', filepath],
         capture_output=True, text=True,
     )
@@ -130,11 +132,12 @@ def api_gpu():
     """Detect NVENC support and list Vulkan/NVIDIA GPUs."""
     import re
 
+    ffmpeg_exec = config.FFMPEG_BIN or 'ffmpeg'
     nvenc_ok = False
     try:
         r = subprocess.run(
-            ['ffmpeg', '-loglevel', 'error',
-             '-f', 'lavfi', '-i', 'nullsrc=s=64x64:d=0.1',
+            [ffmpeg_exec, '-loglevel', 'error',
+             '-f', 'lavfi', '-i', 'nullsrc=s=256x256:d=0.1',
              '-c:v', 'h264_nvenc', '-f', 'null', '-'],
             capture_output=True, timeout=10,
         )
@@ -157,11 +160,28 @@ def api_gpu():
     except Exception:
         pass
 
+    # Windows fallback: list display adapters even when nvidia-smi is not on PATH.
+    if not gpus and platform.system() == 'Windows':
+        try:
+            r2b = subprocess.run(
+                ['powershell', '-NoProfile', '-Command',
+                 'Get-CimInstance Win32_VideoController | '
+                 'Select-Object -ExpandProperty Name'],
+                capture_output=True, text=True, timeout=8,
+            )
+            if r2b.returncode == 0:
+                for idx, line in enumerate(r2b.stdout.splitlines()):
+                    name = line.strip()
+                    if name:
+                        gpus.append({'id': idx, 'name': name})
+        except Exception:
+            pass
+
     # Fallback: try ffmpeg Vulkan device enumeration
     if not gpus:
         try:
             r3 = subprocess.run(
-                ['ffmpeg', '-loglevel', 'verbose',
+                [ffmpeg_exec, '-loglevel', 'verbose',
                  '-init_hw_device', 'vulkan=vk:0', '-f', 'null', '-'],
                 capture_output=True, text=True, timeout=8,
             )
@@ -178,6 +198,7 @@ def api_gpu():
     return jsonify({
         'nvenc_available': nvenc_ok,
         'gpus':            gpus,
+        'ffmpeg_path':      ffmpeg_exec,
         'use_nvenc':       config.USE_NVENC,
         'gpu_device':      config.GPU_DEVICE,
         'force_cpu':       config.FORCE_CPU,
@@ -424,32 +445,49 @@ def settings_page():
     return render_template('settings.html',
                            upscayl_bin=config.UPSCAYL_BIN,
                            upscayl_models_dir=config.UPSCAYL_MODELS_DIR,
+                           ffmpeg_bin=config.FFMPEG_BIN,
+                           bin_exists=os.path.isfile(config.UPSCAYL_BIN) if config.UPSCAYL_BIN else False,
+                           models_exist=os.path.isdir(config.UPSCAYL_MODELS_DIR) if config.UPSCAYL_MODELS_DIR else False,
+                           ffmpeg_exists=os.path.isfile(config.FFMPEG_BIN) if config.FFMPEG_BIN else False,
+                           project_root=config.BASE_DIR,
                            saved=s,
                            autobin=config._autodetect_bin(),
-                           automodels=config._autodetect_models())
+                           automodels=config._autodetect_models(),
+                           platform=platform.system())
 
 
 @app.route('/settings/save', methods=['POST'])
 def settings_save():
     d = request.json or {}
-    new_bin    = d.get('upscayl_bin', '').strip()
-    new_models = d.get('upscayl_models_dir', '').strip()
-    use_nvenc  = bool(d.get('use_nvenc', False))
-    gpu_device = int(d.get('gpu_device', 0))
+    new_bin      = config._normalize_path(d.get('upscayl_bin', ''))
+    new_models   = config._normalize_path(d.get('upscayl_models_dir', ''))
+    new_ffmpeg   = config._normalize_path(d.get('ffmpeg_bin', ''))
+    use_nvenc    = bool(d.get('use_nvenc', False))
+    gpu_device   = int(d.get('gpu_device', 0))
+    force_cpu    = bool(d.get('force_cpu', False))
 
     errors = []
     if new_bin and not os.path.isfile(new_bin):
         errors.append(f'Binario no encontrado: {new_bin}')
     if new_models and not os.path.isdir(new_models):
         errors.append(f'Directorio de modelos no encontrado: {new_models}')
+    if new_ffmpeg and not os.path.isfile(new_ffmpeg):
+        errors.append(f'FFmpeg no encontrado: {new_ffmpeg}')
     if errors:
         return jsonify({'ok': False, 'errors': errors}), 400
 
-    force_cpu  = bool(d.get('force_cpu', False))
+    new_ffprobe = ''
+    if new_ffmpeg:
+        candidate_dir = os.path.dirname(new_ffmpeg)
+        candidate_probe = os.path.join(candidate_dir, 'ffprobe.exe' if new_ffmpeg.lower().endswith('.exe') else 'ffprobe')
+        if os.path.isfile(candidate_probe):
+            new_ffprobe = candidate_probe
 
     config.save_settings({
         'upscayl_bin':        new_bin,
         'upscayl_models_dir': new_models,
+        'ffmpeg_bin':         new_ffmpeg,
+        'ffprobe_bin':        new_ffprobe,
         'use_nvenc':          use_nvenc,
         'gpu_device':         gpu_device,
         'force_cpu':          force_cpu,
@@ -459,6 +497,7 @@ def settings_save():
         'ok':               True,
         'upscayl_bin':      config.UPSCAYL_BIN,
         'upscayl_models_dir': config.UPSCAYL_MODELS_DIR,
+        'ffmpeg_bin':       config.FFMPEG_BIN,
         'use_nvenc':        config.USE_NVENC,
         'gpu_device':       config.GPU_DEVICE,
         'force_cpu':        config.FORCE_CPU,
@@ -468,9 +507,15 @@ def settings_save():
 @app.route('/settings/detect', methods=['POST'])
 def settings_detect():
     """Re-run auto-detection and return results (without saving)."""
+    ffmpeg_bin = config._autodetect_ffmpeg()
     return jsonify({
         'upscayl_bin':        config._autodetect_bin(),
         'upscayl_models_dir': config._autodetect_models(),
+        'ffmpeg_bin':         ffmpeg_bin,
+        'ffprobe_bin':        config._autodetect_ffprobe(ffmpeg_bin),
+        'current_upscayl_bin': config.UPSCAYL_BIN,
+        'current_upscayl_models_dir': config.UPSCAYL_MODELS_DIR,
+        'current_ffmpeg_bin': config.FFMPEG_BIN,
     })
 
 

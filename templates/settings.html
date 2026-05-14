@@ -15,11 +15,27 @@
   <h2 class="title is-5 mb-3">Estado actual</h2>
   <div class="columns">
     <div class="column">
+      <p class="heading">Sistema operativo</p>
+      <p class="has-text-info">
+        <span class="icon"><i class="fas fa-desktop"></i></span>
+        {% if platform == 'Darwin' %}macOS{% elif platform == 'Windows' %}Windows{% elif platform == 'Linux' %}Linux{% else %}{{ platform }}{% endif %}
+      </p>
+    </div>
+    <div class="column">
+      <p class="heading">Project root</p>
+      <p class="has-text-grey is-size-7" style="word-break:break-all;">{{ project_root }}</p>
+    </div>
+    <div class="column">
       <p class="heading">Binario Upscayl</p>
-      {% if upscayl_bin %}
+      {% if upscayl_bin and bin_exists %}
         <p class="has-text-success">
           <span class="icon"><i class="fas fa-check-circle"></i></span>
           <span class="is-size-7" style="word-break:break-all;">{{ upscayl_bin }}</span>
+        </p>
+      {% elif upscayl_bin %}
+        <p class="has-text-danger">
+          <span class="icon"><i class="fas fa-times-circle"></i></span>
+          Ruta configurada pero no encontrada: {{ upscayl_bin }}
         </p>
       {% else %}
         <p class="has-text-danger">
@@ -30,10 +46,15 @@
     </div>
     <div class="column">
       <p class="heading">Directorio de modelos</p>
-      {% if upscayl_models_dir %}
+      {% if upscayl_models_dir and models_exist %}
         <p class="has-text-success">
           <span class="icon"><i class="fas fa-check-circle"></i></span>
           <span class="is-size-7" style="word-break:break-all;">{{ upscayl_models_dir }}</span>
+        </p>
+      {% elif upscayl_models_dir %}
+        <p class="has-text-danger">
+          <span class="icon"><i class="fas fa-times-circle"></i></span>
+          Ruta configurada pero no encontrada: {{ upscayl_models_dir }}
         </p>
       {% else %}
         <p class="has-text-danger">
@@ -45,17 +66,33 @@
   </div>
 </div>
 
+<div class="box mb-4">
+  <h2 class="title is-5 mb-3">Auto-detected paths</h2>
+  <div class="columns">
+    <div class="column">
+      <p class="heading">Binary candidate</p>
+      <p class="has-text-grey is-size-7" style="word-break:break-all;">{{ autobin or 'None' }}</p>
+    </div>
+    <div class="column">
+      <p class="heading">Models candidate</p>
+      <p class="has-text-grey is-size-7" style="word-break:break-all;">{{ automodels or 'None' }}</p>
+    </div>
+  </div>
+</div>
+
 <!-- Edit form -->
 <div class="box mb-4">
   <h2 class="title is-5 mb-1">Rutas de Upscayl</h2>
   <p class="has-text-grey is-size-7 mb-4">
     Si la detección automática no funciona, ingresa las rutas manualmente.
     Los cambios se guardan en <code>settings.json</code> y se aplican de inmediato sin reiniciar.
+    <br>
+    En WSL, usa espacios normales en la ruta: <code>/mnt/c/Program Files/Upscayl/resources/models</code>, no <code>/mnt/c/Program\ Files/... </code>.
   </p>
 
   <!-- macOS hint -->
   <div class="notification is-dark py-3 px-4 mb-4 is-size-7">
-    <p class="has-text-weight-semibold mb-1">📍 Rutas típicas según plataforma</p>
+    <p class="has-text-weight-semibold mb-1">📍 Rutas típicas según tu plataforma</p>
     <table class="table is-narrow is-size-7" style="background:transparent;">
       <thead><tr>
         <th class="has-text-grey-light">Plataforma</th>
@@ -63,6 +100,7 @@
         <th class="has-text-grey-light">Modelos</th>
       </tr></thead>
       <tbody>
+        {% if platform == 'Darwin' %}
         <tr>
           <td><span class="tag is-dark">macOS</span></td>
           <td style="word-break:break-all;font-family:monospace;font-size:.7rem;">
@@ -72,6 +110,7 @@
             /Applications/Upscayl.app/Contents/Resources/models
           </td>
         </tr>
+        {% elif platform == 'Windows' %}
         <tr>
           <td><span class="tag is-dark">Windows</span></td>
           <td style="word-break:break-all;font-family:monospace;font-size:.7rem;">
@@ -81,18 +120,28 @@
             C:\Program Files\Upscayl\resources\models
           </td>
         </tr>
+        {% elif platform == 'Linux' %}
         <tr>
           <td><span class="tag is-dark">Linux</span></td>
           <td style="font-family:monospace;font-size:.7rem;">/usr/bin/upscayl-bin</td>
           <td style="font-family:monospace;font-size:.7rem;">/usr/share/upscayl/models</td>
         </tr>
+        {% endif %}
       </tbody>
     </table>
+    {% if platform == 'Linux' %}
+    <p class="has-text-grey mt-2">
+      Si estás en WSL (Windows Subsystem for Linux) y Upscayl está instalado en Windows, usa rutas como <code>/mnt/c/Program Files/Upscayl/...</code> en lugar de <code>C:\Program Files\...</code>.
+      Para mejores resultados, instala la versión de Linux de Upscayl directamente en WSL.
+    </p>
+    {% endif %}
+    {% if platform == 'Darwin' %}
     <p class="has-text-grey mt-2">
       Tip macOS: abre Terminal y ejecuta
       <code>find /Applications/Upscayl.app -name "upscayl-bin" 2>/dev/null</code>
       para confirmar la ruta exacta en tu versión.
     </p>
+    {% endif %}
   </div>
 
   <div class="field">
@@ -104,6 +153,17 @@
       <span class="icon is-left"><i class="fas fa-terminal"></i></span>
     </div>
     <p class="help" id="help-bin"></p>
+  </div>
+
+  <div class="field">
+    <label class="label">Ruta al binario <code>ffmpeg</code></label>
+    <div class="control has-icons-left">
+      <input class="input" type="text" id="inp-ffmpeg"
+        placeholder="Ej: C:\\ffmpeg\\bin\\ffmpeg.exe"
+        value="{{ ffmpeg_bin }}"/>
+      <span class="icon is-left"><i class="fas fa-film"></i></span>
+    </div>
+    <p class="help" id="help-ffmpeg">{% if ffmpeg_bin %}Detectado: {{ ffmpeg_bin }}{% else %}ffmpeg no encontrado. Ingresa la ruta manualmente.{% endif %}</p>
   </div>
 
   <div class="field">
@@ -160,9 +220,10 @@
 {% block scripts %}
 <script>
 async function saveSettings() {
-  const bin    = document.getElementById('inp-bin').value.trim();
-  const models = document.getElementById('inp-models').value.trim();
-  const btn    = document.getElementById('btn-save');
+  const bin     = document.getElementById('inp-bin').value.trim();
+  const ffmpeg  = document.getElementById('inp-ffmpeg').value.trim();
+  const models  = document.getElementById('inp-models').value.trim();
+  const btn     = document.getElementById('btn-save');
   btn.classList.add('is-loading');
 
   document.getElementById('save-error').style.display = 'none';
@@ -172,7 +233,7 @@ async function saveSettings() {
     const res  = await fetch('/settings/save', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({upscayl_bin: bin, upscayl_models_dir: models}),
+      body: JSON.stringify({upscayl_bin: bin, ffmpeg_bin: ffmpeg, upscayl_models_dir: models}),
     });
     const data = await res.json();
     if (data.ok) {
@@ -214,6 +275,14 @@ async function autoDetect() {
     } else {
       document.getElementById('help-models').textContent = '⚠ No se pudo detectar. Ingresa la ruta manualmente.';
       document.getElementById('help-models').className = 'help is-warning';
+    }
+    if (data.ffmpeg_bin) {
+      document.getElementById('inp-ffmpeg').value = data.ffmpeg_bin;
+      document.getElementById('help-ffmpeg').textContent = '✓ Detectado automáticamente';
+      document.getElementById('help-ffmpeg').className = 'help is-success';
+    } else {
+      document.getElementById('help-ffmpeg').textContent = '⚠ No se pudo detectar. Ingresa la ruta manualmente.';
+      document.getElementById('help-ffmpeg').className = 'help is-warning';
     }
   } finally {
     btn.classList.remove('is-loading');

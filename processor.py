@@ -133,9 +133,10 @@ class VideoProcessor:
         self._log(log_path, f'=== EXTRACT FRAMES ===')
         self._log(log_path, f'start_time={start_time:.4f}s  duration={duration:.4f}s  expected={total_exp}')
 
+        ffmpeg_exec = config.FFMPEG_BIN or 'ffmpeg'
         ffmpeg_log = os.path.join(frames_dir, '_ffmpeg_extract.log')
         cmd = [
-            'ffmpeg', '-y',
+            ffmpeg_exec, '-y',
             '-ss', f'{start_time:.4f}',
             '-i', job['filepath'],
             '-t', f'{duration:.4f}',
@@ -266,6 +267,9 @@ class VideoProcessor:
                     '-z', str(job['scale']),
                     '-f', 'png',
                 ]
+                gpu_flags = self._upscayl_gpu_flags(log_path)
+                if gpu_flags:
+                    cmd += gpu_flags
                 self._log(log_path, 'CMD: ' + ' '.join(cmd))
                 update_job(job_id, {
                     'stage':    f'Upscaleando {len(needed)} frames…',
@@ -464,8 +468,9 @@ class VideoProcessor:
         if scale_filter:
             self._log(log_path, f'output_scale_filter={scale_filter}')
 
+        ffmpeg_exec = config.FFMPEG_BIN or 'ffmpeg'
         encode_base = [
-            'ffmpeg', '-y',
+            ffmpeg_exec, '-y',
             '-start_number', '1',      # explicit: frames are frame_000001.png…
             '-framerate', str(fps),
             '-i', frame_pattern,
@@ -479,9 +484,20 @@ class VideoProcessor:
             duration = (job['end_frame'] - job['start_frame']) / fps
             tmp_path = out_path.replace('.mp4', '_novid.mp4')
 
+            update_job(job_id, {
+                'stage':    'Armando video final · codificando video',
+                'progress': 90,
+                'eta':       0,
+            })
             self._run_log(encode_base + [tmp_path], log_path)
+
+            update_job(job_id, {
+                'stage':    'Armando video final · multiplexando audio',
+                'progress': 95,
+                'eta':       0,
+            })
             self._run_log([
-                'ffmpeg', '-y',
+                ffmpeg_exec, '-y',
                 '-i', tmp_path,
                 '-ss', f'{start_t:.4f}', '-t', f'{duration:.4f}',
                 '-i', job['filepath'],
@@ -491,6 +507,11 @@ class VideoProcessor:
             ], log_path)
             os.remove(tmp_path)
         else:
+            update_job(job_id, {
+                'stage':    'Armando video final · codificando video',
+                'progress': 90,
+                'eta':       0,
+            })
             self._run_log(encode_base + [out_path], log_path)
 
         self._log(log_path, f'Assembly complete: {out_path}')
@@ -520,11 +541,39 @@ class VideoProcessor:
         if result.returncode != 0:
             raise RuntimeError(result.stderr.decode(errors='replace')[-500:])
 
-    def _is_black_frame(self, png_path: str) -> bool:
-        """Downscale PNG to 1×1 via ffmpeg and check if average colour is near black."""
+    def _upscayl_gpu_flags(self, log_path: str) -> list[str]:
+        """Return GPU selection flags for upscayl-bin when its build supports them."""
+        if not config.UPSCAYL_BIN:
+            return []
         try:
             r = subprocess.run(
-                ['ffmpeg', '-loglevel', 'error',
+                [config.UPSCAYL_BIN, '--help'],
+                capture_output=True, text=True, timeout=8,
+            )
+            help_text = (r.stdout or '') + (r.stderr or '')
+        except Exception as exc:
+            self._log(log_path, f'Could not inspect upscayl-bin GPU flags: {exc}')
+            return []
+
+        supports_gpu_arg = bool(_re.search(r'(^|\s)-g([,\s]|$)|gpu', help_text, _re.I))
+        if not supports_gpu_arg:
+            self._log(log_path, 'upscayl-bin help does not advertise -g; using default GPU selection.')
+            return []
+
+        if config.FORCE_CPU:
+            self._log(log_path, 'FORCE_CPU=True: passing -g -1 to upscayl-bin.')
+            return ['-g', '-1']
+
+        gpu_id = int(getattr(config, 'GPU_DEVICE', 0) or 0)
+        self._log(log_path, f'Using upscayl-bin GPU device {gpu_id} via -g.')
+        return ['-g', str(gpu_id)]
+
+    def _is_black_frame(self, png_path: str) -> bool:
+        """Downscale PNG to 1×1 via ffmpeg and check if average colour is near black."""
+        ffmpeg_exec = config.FFMPEG_BIN or 'ffmpeg'
+        try:
+            r = subprocess.run(
+                [ffmpeg_exec, '-loglevel', 'error',
                  '-i', png_path,
                  '-vf', 'scale=1:1',
                  '-vframes', '1',
@@ -540,10 +589,11 @@ class VideoProcessor:
 
     def _nvenc_available(self) -> bool:
         """Quick test — encode 1 null frame with h264_nvenc; returns True if it works."""
+        ffmpeg_exec = config.FFMPEG_BIN or 'ffmpeg'
         try:
             r = subprocess.run(
-                ['ffmpeg', '-loglevel', 'error',
-                 '-f', 'lavfi', '-i', 'nullsrc=s=64x64:d=0.1',
+                [ffmpeg_exec, '-loglevel', 'error',
+                 '-f', 'lavfi', '-i', 'nullsrc=s=256x256:d=0.1',
                  '-c:v', 'h264_nvenc', '-f', 'null', '-'],
                 capture_output=True, timeout=10,
             )
@@ -552,8 +602,9 @@ class VideoProcessor:
             return False
 
     def _has_audio(self, filepath: str) -> bool:
+        ffprobe_exec = config.FFPROBE_BIN or 'ffprobe'
         r = subprocess.run(
-            ['ffprobe', '-v', 'quiet', '-show_streams',
+            [ffprobe_exec, '-v', 'quiet', '-show_streams',
              '-select_streams', 'a', filepath],
             capture_output=True, text=True,
         )

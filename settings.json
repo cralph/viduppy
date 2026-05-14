@@ -1,7 +1,0 @@
-{
-  "upscayl_bin": "/Applications/Upscayl.app/Contents/Resources/bin/upscayl-bin",
-  "upscayl_models_dir": "/Applications/Upscayl.app/Contents/Resources/models",
-  "use_nvenc": false,
-  "gpu_device": 0,
-  "force_cpu": false
-}
