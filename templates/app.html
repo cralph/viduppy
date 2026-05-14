@@ -26,6 +26,7 @@ button{font-family:var(--sans)}
 .topbar{grid-column:1/-1;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;gap:12px;z-index:100}
 .sidebar{background:var(--bg2);border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column}
 .main{overflow-y:auto}
+.mobile-tabs{display:none}
 
 /* Topbar */
 .logo{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--accent);letter-spacing:2px;text-transform:uppercase}
@@ -211,6 +212,65 @@ button{font-family:var(--sans)}
 
 @media(max-width:768px){.shell{grid-template-columns:1fr}.sidebar{display:none}.stats-row{grid-template-columns:1fr 1fr}}
 @media(max-width:1000px){.job-meta-grid{grid-template-columns:1fr}}
+
+@media(max-width:768px){
+  .topbar{padding:0 10px;gap:8px;height:52px}
+  .logo{font-size:10px;letter-spacing:1.4px;max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .topbar-sep{display:none}
+  #workerStatus{font-size:11px !important}
+  #activeJobTopbar{display:none}
+  #clockEl{font-size:10px !important}
+  .main{padding-bottom:74px}
+  .mobile-tabs{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:6px;
+    position:sticky;
+    top:0;
+    z-index:90;
+    background:var(--bg);
+    border-bottom:1px solid var(--border);
+    padding:8px 10px;
+  }
+  .mobile-tab-btn{
+    border:1px solid var(--border);
+    background:var(--bg2);
+    color:var(--text2);
+    border-radius:10px;
+    min-height:36px;
+    font-size:12px;
+    padding:6px 8px;
+  }
+  .mobile-tab-btn .mini-badge{
+    margin-left:6px;
+    background:var(--accent);
+    color:#fff;
+    border-radius:999px;
+    font-size:10px;
+    font-family:var(--mono);
+    padding:1px 6px;
+    font-weight:700;
+  }
+  .mobile-tab-btn.active{
+    border-color:var(--accent);
+    color:var(--accent);
+    background:rgba(124,111,255,.12);
+  }
+  .content-pad{padding:14px}
+  .section-title{font-size:10px;letter-spacing:1.3px;margin-bottom:12px}
+  .upload-zone{padding:28px 16px}
+  .upload-zone h3{font-size:18px}
+  .upload-zone p{font-size:13px}
+  .controls-row{grid-template-columns:1fr}
+  .resize-grid{grid-template-columns:1fr}
+  .job-header{flex-direction:column;gap:9px}
+  .job-thumb{width:100%;height:132px}
+  .job-actions{flex-wrap:wrap}
+  .modal-bg{padding:10px}
+  .modal{padding:14px}
+  .toast-container{left:10px;right:10px;bottom:10px}
+  .toast{min-width:0}
+}
 </style>
 </head>
 <body>
@@ -260,6 +320,11 @@ button{font-family:var(--sans)}
 
   <!-- Main -->
   <main class="main">
+    <nav class="mobile-tabs" aria-label="Mobile navigation">
+      <button class="mobile-tab-btn active" onclick="showPanel('new')" id="mnav-new">New Job</button>
+      <button class="mobile-tab-btn" onclick="showPanel('queue')" id="mnav-queue">Queue <span class="mini-badge" id="mqueueBadge" style="display:none">0</span></button>
+      <button class="mobile-tab-btn" onclick="showPanel('settings')" id="mnav-settings">Settings</button>
+    </nav>
 
     <!-- ── Panel: New Job ───────────────────────────────────────────────────── -->
     <div class="panel active content-pad" id="panel-new">
@@ -689,7 +754,11 @@ function showPanel(id) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.getElementById(`panel-${id}`).classList.add('active');
   document.querySelectorAll('.sidebar-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById(`nav-${id}`).classList.add('active');
+  const sideBtn = document.getElementById(`nav-${id}`);
+  if (sideBtn) sideBtn.classList.add('active');
+  document.querySelectorAll('.mobile-tab-btn').forEach(b => b.classList.remove('active'));
+  const mobileBtn = document.getElementById(`mnav-${id}`);
+  if (mobileBtn) mobileBtn.classList.add('active');
   if (id === 'settings') loadSettingsUI();
 }
 
@@ -1123,6 +1192,11 @@ function renderQueue() {
   const qCount = activeJobs.length;
   document.getElementById('queueBadge').textContent = qCount;
   document.getElementById('queueBadge').style.display = qCount > 0 ? '' : 'none';
+  const mobileQueueBadge = document.getElementById('mqueueBadge');
+  if (mobileQueueBadge) {
+    mobileQueueBadge.textContent = qCount;
+    mobileQueueBadge.style.display = qCount > 0 ? '' : 'none';
+  }
   refreshLiveTimers();
 }
 
