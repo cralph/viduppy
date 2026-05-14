@@ -258,7 +258,7 @@ class VideoProcessor:
 
                 # ── Run upscayl-bin on the whole directory ────────────────────
                 # NOTE: scale flag is -z (not -s) — confirmed from working reference.
-                cmd = [
+                cmd_base = [
                     config.UPSCAYL_BIN,
                     '-i', subset_dir,
                     '-o', upscaled_dir,
@@ -268,24 +268,31 @@ class VideoProcessor:
                     '-f', 'png',
                 ]
                 gpu_flags = self._upscayl_gpu_flags(log_path)
-                if gpu_flags:
-                    cmd += gpu_flags
-                self._log(log_path, 'CMD: ' + ' '.join(cmd))
+                cmd_preferred = cmd_base + (gpu_flags or [])
+                cmd_abs_models = [
+                    config.UPSCAYL_BIN,
+                    '-i', subset_dir,
+                    '-o', upscaled_dir,
+                    '-m', config.UPSCAYL_MODELS_DIR,
+                    '-n', job['model'],
+                    '-z', str(job['scale']),
+                    '-f', 'png',
+                ]
+                self._log(log_path, 'CMD: ' + ' '.join(cmd_preferred))
                 update_job(job_id, {
                     'stage':    f'Upscaling {len(needed)} frames…',
                     'progress': 12,
                     'frames_to_process': total,
                 })
 
-                def _run_upscayl(extra_flags: list, label: str):
-                    full_cmd = cmd + extra_flags
-                    self._log(log_path, f'CMD [{label}]: ' + ' '.join(full_cmd))
+                def _run_upscayl(run_cmd: list, label: str):
+                    self._log(log_path, f'CMD [{label}]: ' + ' '.join(run_cmd))
                     upscayl_log = os.path.join(
                         config.OUTPUT_FOLDER, f'{job_id}_upscayl_{label}.log'
                     )
                     log_f = open(upscayl_log, 'a', encoding='utf-8', errors='replace')
                     p = subprocess.Popen(
-                        full_cmd,
+                        run_cmd,
                         stdout=log_f,
                         stderr=subprocess.STDOUT,
                         text=True,
@@ -327,7 +334,7 @@ class VideoProcessor:
                                 except subprocess.TimeoutExpired:
                                     p.kill()
                                     p.wait()
-                                return p
+                                return p, upscayl_log
                             time.sleep(0.5)
                             _update_from_counts()
                     finally:
@@ -335,7 +342,8 @@ class VideoProcessor:
 
                     _update_from_counts(force=True)
                     p.wait()
-                    return p
+                    self._log(log_path, f'upscayl [{label}] exit_code={p.returncode}')
+                    return p, upscayl_log
 
                 # ── Run upscayl-bin on GPU ────────────────────────────────────────
                 # NOTE: this build of upscayl-bin does NOT support -g -1 (CPU mode).
@@ -345,15 +353,44 @@ class VideoProcessor:
                         'FORCE_CPU=True but this upscayl-bin build does not support '
                         '-g -1 (CPU). Running on GPU anyway.')
 
-                proc = _run_upscayl([], 'gpu')
+                proc, upscayl_log = _run_upscayl(cmd_preferred, 'gpu')
                 if self.queue.should_stop():
                     return
+
+                # Windows access-violation crash can happen after pause/resume on some GPU stacks.
+                # Retry once with default GPU selection (without explicit -g) when possible.
+                if proc.returncode in (3221225477, -1073741819) and gpu_flags:
+                    self._log(
+                        log_path,
+                        f'upscayl-bin exited with access violation ({proc.returncode}). '
+                        'Retrying once without explicit GPU device flags.',
+                    )
+                    time.sleep(1.0)
+                    proc, upscayl_log = _run_upscayl(cmd_base, 'gpu-retry')
+                    if self.queue.should_stop():
+                        return
+
+                # Some Windows setups fail with relative -m "..\\models".
+                # Retry once with absolute models path.
+                if proc.returncode in (3221225477, -1073741819):
+                    self._log(
+                        log_path,
+                        f'upscayl-bin still failing ({proc.returncode}). '
+                        'Retrying once with absolute models path.',
+                    )
+                    time.sleep(1.0)
+                    proc, upscayl_log = _run_upscayl(cmd_abs_models, 'gpu-retry-abs-models')
+                    if self.queue.should_stop():
+                        return
+
                 if proc.returncode != 0:
                     raise RuntimeError(
-                        f'Upscayl-bin failed (code {proc.returncode}). '
-                        f'Check that model "{job["model"]}" is installed '
-                        f'(requires {job["model"]}.param and {job["model"]}.bin in the '
-                        f'models directory). Check log: {log_path}'
+                        self._format_upscayl_failure(
+                            job=job,
+                            return_code=proc.returncode,
+                            upscayl_log=upscayl_log,
+                            main_log=log_path,
+                        )
                     )
 
                 # Check if GPU silently produced black frames (model not installed)
@@ -688,6 +725,33 @@ class VideoProcessor:
         if abs(factor - 1.0) > 1e-6:
             return f'_f{factor:g}'
         return ''
+
+    def _format_upscayl_failure(self, job: dict, return_code: int,
+                                upscayl_log: str, main_log: str) -> str:
+        if return_code in (3221225477, -1073741819):
+            tail = self._tail_text(upscayl_log, 500)
+            details = f' Last upscayl log tail: {tail}' if tail else ''
+            return (
+                f'Upscayl-bin crashed with Windows access violation (code {return_code}, 0xC0000005). '
+                'This is usually a GPU/driver/runtime crash (often after pause/resume), not a missing model. '
+                'Try changing GPU device in Settings, disabling overlays/recorders, or updating GPU drivers. '
+                f'Check logs: {main_log} and {upscayl_log}.{details}'
+            )
+
+        return (
+            f'Upscayl-bin failed (code {return_code}). '
+            f'Check that model "{job["model"]}" is installed '
+            f'(requires {job["model"]}.param and {job["model"]}.bin in the models directory). '
+            f'Check logs: {main_log} and {upscayl_log}.'
+        )
+
+    def _tail_text(self, path: str, limit: int = 500) -> str:
+        try:
+            txt = open(path, encoding='utf-8', errors='replace').read()
+            txt = txt.strip()
+            return txt[-limit:] if txt else ''
+        except Exception:
+            return ''
 
     def _model_is_installed(self, model_id: str) -> bool:
         if not config.UPSCAYL_MODELS_DIR:
