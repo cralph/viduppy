@@ -310,8 +310,18 @@ def resume_job(job_id):
 
 @app.route('/job/<job_id>/cancel', methods=['POST'])
 def cancel_job(job_id):
+    job = get_job(job_id)
+    prev_elapsed = float((job or {}).get('elapsed_time', 0) or 0)
+    started_at   = float((job or {}).get('started_at',   0) or 0)
+    elapsed_now  = prev_elapsed + (time.time() - started_at if started_at else 0)
     queue.cancel_job(job_id)
-    update_job(job_id, {'status': 'cancelled', 'stage': 'Cancelled'})
+    update_job(job_id, {
+        'status':       'cancelled',
+        'stage':        'Cancelled',
+        'elapsed_time': round(elapsed_now, 1),
+        'completed_at': time.time(),
+        'eta':          0,
+    })
     return jsonify({'ok': True})
 
 

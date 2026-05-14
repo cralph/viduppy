@@ -316,6 +316,7 @@ button{font-family:var(--sans)}
             <span>→</span>
             <span>To: <b id="rangeTo">0:00</b></span>
             <span class="range-pill" id="rangeFrames">All frames</span>
+            <span class="range-pill" id="rangeDuration">Clip: 0:00 (0.0s)</span>
             <button onclick="selectAll()" style="font-size:11px;color:var(--text3);background:none;border:none;cursor:pointer">Select all</button>
             <button onclick="selectPct(50)" style="font-size:11px;color:var(--text3);background:none;border:none;cursor:pointer">First 50%</button>
           </div>
@@ -563,6 +564,9 @@ const I18N = {
     'jobs.input': 'input',
     'jobs.output': 'output',
     'jobs.duration': 'duration',
+    'jobs.total_processing': 'processing time',
+    'timeline.clip': 'Clip',
+    'timeline.all_frames': 'All frames',
     'jobs.elapsed_title': 'Elapsed time',
     'jobs.eta_title': 'Estimated time remaining',
     'jobs.remaining': 'remaining',
@@ -591,6 +595,9 @@ const I18N = {
     'jobs.input': 'entrada',
     'jobs.output': 'salida',
     'jobs.duration': 'duración',
+    'jobs.total_processing': 'tiempo de procesamiento',
+    'timeline.clip': 'Clip',
+    'timeline.all_frames': 'Todos los frames',
     'jobs.elapsed_title': 'Tiempo transcurrido',
     'jobs.eta_title': 'Tiempo restante estimado',
     'jobs.remaining': 'restante',
@@ -815,7 +822,10 @@ function updateTimeline() {
   const fEnd   = Math.round(rangeEndPct   * videoData.total_frames);
   const count  = fEnd - fStart;
   document.getElementById('rangeFrames').textContent =
-    count === videoData.total_frames ? 'All frames' : `${fmtFrames(count)} frames (${fStart}→${fEnd})`;
+    count === videoData.total_frames ? t('timeline.all_frames') : `${fmtFrames(count)} frames (${fStart}→${fEnd})`;
+  const clipSec = Math.max(0, count / Math.max(videoData.fps || 0, 1));
+  document.getElementById('rangeDuration').textContent =
+    `${t('timeline.clip')}: ${fmtClock(clipSec)} (${clipSec.toFixed(1)}s)`;
   updateOutputEstimate();
 }
 
@@ -1215,6 +1225,7 @@ function renderJobCard(job, opts = {}) {
     ? Math.min(100, (job.current_frame || 0) / (job.frames_to_process || 1) * 100)
     : 0;
   const elapsed      = getElapsed(job);
+  const totalElapsed = elapsed > 0 ? fmtElapsed(elapsed) : '0s';
   const liveEta      = getLiveEta(job);
 
   const showProgress = ['processing','queued','paused'].includes(job.status);
@@ -1249,17 +1260,6 @@ function renderJobCard(job, opts = {}) {
 
   const errorHtml = job.status === 'error'
     ? `<div style="font-size:11px;color:var(--red);margin-top:6px;font-family:var(--mono)">⚠ ${job.error_msg||'Unknown error'}</div>` : '';
-  const completedFrames = Math.max(0,
-    parseInt(job.frames_to_process || 0, 10) ||
-    ((job.end_frame != null && job.start_frame != null) ? (job.end_frame - job.start_frame) : 0)
-  );
-  const completedInfo = job.status === 'completed' ? `
-    <div style="margin-top:8px;padding:8px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;font-family:var(--mono);font-size:11px;color:var(--text2);display:flex;gap:14px;flex-wrap:wrap">
-      <span>frames ${fmtFrames(completedFrames)}</span>
-      <span>time ${fmtElapsed(elapsed)}</span>
-    </div>
-  ` : '';
-
   return `
   <div class="job-card ${job.status}" id="jc-${job.id}">
     <div class="job-header">
@@ -1278,6 +1278,7 @@ function renderJobCard(job, opts = {}) {
           <div class="job-meta-item"><span class="job-meta-key">${t('jobs.input')}</span><span class="job-meta-val">${job.width||'?'}×${job.height||'?'}</span></div>
           <div class="job-meta-item"><span class="job-meta-key">${t('jobs.output')}</span><span class="job-meta-val">${outputHint}</span></div>
           <div class="job-meta-item"><span class="job-meta-key">${t('jobs.duration')}</span><span class="job-meta-val">${fmtClock(videoDur)}</span></div>
+          <div class="job-meta-item"><span class="job-meta-key">${t('jobs.total_processing')}</span><span class="job-meta-val">${totalElapsed}</span></div>
         </div>
       </div>
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px">
@@ -1285,7 +1286,7 @@ function renderJobCard(job, opts = {}) {
         <div class="job-actions">${actions.join('')}</div>
       </div>
     </div>
-    ${progressHtml}${completedInfo}${errorHtml}
+    ${progressHtml}${errorHtml}
     <div style="font-size:10px;color:var(--text3);margin-top:7px;font-family:var(--mono)">${createdStr}</div>
   </div>`;
 }

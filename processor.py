@@ -28,10 +28,17 @@ class VideoProcessor:
                 try:
                     self._process(job_id)
                 except Exception as exc:
+                    job = get_job(job_id) or {}
+                    prev_elapsed = float(job.get('elapsed_time', 0) or 0)
+                    started_at = float(job.get('started_at', 0) or 0)
+                    elapsed_total = prev_elapsed + (time.time() - started_at if started_at else 0)
                     update_job(job_id, {
                         'status': 'error',
                         'stage': f'Error: {exc}',
                         'error_msg': str(exc),
+                        'elapsed_time': round(elapsed_total, 1),
+                        'completed_at': time.time(),
+                        'eta': 0,
                     })
                 finally:
                     self.queue.finish_processing()
@@ -415,6 +422,7 @@ class VideoProcessor:
                 shutil.rmtree(subset_dir, ignore_errors=True)
 
         # ── Strip upscayl suffixes from output filenames ──────────────────────
+        self._log(log_path, 'Post-upscale: normalizing output filenames…')
         with os.scandir(upscaled_dir) as scan:
             for entry in scan:
                 if not (entry.is_file() and entry.name.endswith('.png')):
@@ -423,10 +431,7 @@ class VideoProcessor:
                     m = _re.match(r'(frame_\d+)', entry.name)
                     if m:
                         new_path = os.path.join(upscaled_dir, m.group(1) + '.png')
-                        if not os.path.exists(new_path):
-                            os.replace(entry.path, new_path)
-                        else:
-                            os.remove(entry.path)
+                        self._replace_with_retry(entry.path, new_path)
 
         # ── Verify frame count ────────────────────────────────────────────────
         final_pngs = sorted(
@@ -458,11 +463,12 @@ class VideoProcessor:
             )
 
         # ── Normalize to frame_000001.png … for FFmpeg ────────────────────────
+        self._log(log_path, 'Post-upscale: reindexing frames to frame_%06d.png…')
         for idx, fname in enumerate(final_pngs):
             src    = os.path.join(upscaled_dir, fname)
             target = os.path.join(upscaled_dir, f'frame_{idx + 1:06d}.png')
             if os.path.normcase(src) != os.path.normcase(target):
-                os.replace(src, target)
+                self._replace_with_retry(src, target)
 
         self._log(log_path, f'Upscaling done. {total} frames ready.')
         update_job(job_id, {'stage': 'Frames upscaled, assembling video…', 'progress': 85, 'eta': 0})
@@ -752,6 +758,36 @@ class VideoProcessor:
             return txt[-limit:] if txt else ''
         except Exception:
             return ''
+
+    def _replace_with_retry(self, src: str, dst: str, retries: int = 8):
+        """
+        Robust replace for Windows/OneDrive paths where files may be briefly locked
+        by antivirus/indexer/sync.
+        """
+        last_exc = None
+        for i in range(retries):
+            try:
+                if os.path.exists(dst):
+                    os.remove(dst)
+                os.replace(src, dst)
+                return
+            except FileNotFoundError:
+                # If source is already gone, treat as done.
+                if not os.path.exists(src):
+                    return
+                last_exc = None
+                break
+            except PermissionError as exc:
+                last_exc = exc
+                time.sleep(0.15 * (i + 1))
+            except OSError as exc:
+                last_exc = exc
+                time.sleep(0.10 * (i + 1))
+        if last_exc:
+            raise RuntimeError(
+                f'Could not rename frame file after {retries} retries: '
+                f'{os.path.basename(src)} -> {os.path.basename(dst)} ({last_exc})'
+            )
 
     def _model_is_installed(self, model_id: str) -> bool:
         if not config.UPSCAYL_MODELS_DIR:
