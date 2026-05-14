@@ -79,7 +79,7 @@ class VideoProcessor:
                     f'<= source ({job.get("width", 0)}x{job.get("height", 0)}).'
                 )
                 update_job(job_id, {
-                    'stage': 'Redimensionando con FFmpeg (sin Upscayl)…',
+                    'stage': 'Resizing with FFmpeg (without Upscayl)…',
                     'progress': 85,
                     'eta': 0,
                 })
@@ -117,7 +117,7 @@ class VideoProcessor:
                 f'Extraction skipped: reusing {existing} existing frames (expected {total_exp}).'
             )
             update_job(job_id, {
-                'stage': 'Reusando frames extraídos',
+                'stage': 'Reusing extracted frames',
                 'progress': 12,
                 'frames_extracted': existing,
                 'frames_to_process': existing,
@@ -125,7 +125,7 @@ class VideoProcessor:
             return
 
         update_job(job_id, {
-            'stage':    'Extrayendo frames',
+            'stage':    'Extracting frames',
             'progress': 0,
             'frames_to_process': total_exp,
         })
@@ -156,7 +156,7 @@ class VideoProcessor:
             count = len(glob.glob(os.path.join(frames_dir, '*.png')))
             pct   = min(100, (count / max(total_exp, 1)) * 100)
             update_job(job_id, {
-                'stage':    f'Extrayendo frames ({count}/{total_exp})',
+                'stage':    f'Extracting frames ({count}/{total_exp})',
                 'progress': round(pct * 0.12, 1),
                 'frames_extracted': count,
             })
@@ -167,13 +167,13 @@ class VideoProcessor:
             try:
                 log_tail = open(ffmpeg_log).read()[-800:]
             except Exception:
-                log_tail = '(sin log)'
+                log_tail = '(no log)'
             raise RuntimeError(f'FFmpeg extraction failed (code {proc.returncode}):\n{log_tail}')
 
         extracted = len(glob.glob(os.path.join(frames_dir, '*.png')))
         self._log(log_path, f'Extracted {extracted} frames OK')
         update_job(job_id, {
-            'stage':    f'Frames extraídos: {extracted}',
+            'stage':    f'Frames extracted: {extracted}',
             'progress': 12,
             'frames_extracted': extracted,
             'frames_to_process': extracted,
@@ -190,17 +190,17 @@ class VideoProcessor:
         )
         total = len(all_frame_names)
         if total == 0:
-            raise RuntimeError('No se extrajeron frames.')
+            raise RuntimeError('No frames were extracted.')
 
         if not config.UPSCAYL_BIN:
-            raise RuntimeError('upscayl-bin no encontrado. Configura la ruta en Configuración.')
+            raise RuntimeError('upscayl-bin not found. Set the path in Settings.')
         if not config.UPSCAYL_MODELS_DIR:
-            raise RuntimeError('Directorio de modelos no encontrado. Configura la ruta en Configuración.')
+            raise RuntimeError('Models directory not found. Set the path in Settings.')
         if not self._model_is_installed(job['model']):
-            installed = ', '.join(self._list_installed_models()[:12]) or '(ninguno)'
+            installed = ', '.join(self._list_installed_models()[:12]) or '(none)'
             raise RuntimeError(
-                f'El modelo "{job["model"]}" no está instalado en {config.UPSCAYL_MODELS_DIR}. '
-                f'Modelos detectados: {installed}'
+                f'Model "{job["model"]}" is not installed in {config.UPSCAYL_MODELS_DIR}. '
+                f'Detected models: {installed}'
             )
 
         self._log(log_path, f'\n=== UPSCALE FRAMES ({total} frames) ===')
@@ -272,7 +272,7 @@ class VideoProcessor:
                     cmd += gpu_flags
                 self._log(log_path, 'CMD: ' + ' '.join(cmd))
                 update_job(job_id, {
-                    'stage':    f'Upscaleando {len(needed)} frames…',
+                    'stage':    f'Upscaling {len(needed)} frames…',
                     'progress': 12,
                     'frames_to_process': total,
                 })
@@ -310,7 +310,7 @@ class VideoProcessor:
                             elapsed = max(0.001, now - _start_t)
                             eta = int((elapsed / processed) * remaining) if processed > 0 else 0
                             update_job(job_id, {
-                                'stage':         f'Upscaleando frames ({done}/{total}) · {pct:.1f}%',
+                                'stage':         f'Upscaling frames ({done}/{total}) · {pct:.1f}%',
                                 'progress':      round(overall, 1),
                                 'current_frame': done,
                                 'frames_to_process': total,
@@ -342,18 +342,18 @@ class VideoProcessor:
                 # FORCE_CPU is kept in settings for future compatibility but is a no-op here.
                 if config.FORCE_CPU:
                     self._log(log_path,
-                        'FORCE_CPU=True pero esta versión de upscayl-bin no soporta '
-                        '-g -1 (CPU). Ejecutando en GPU de todas formas.')
+                        'FORCE_CPU=True but this upscayl-bin build does not support '
+                        '-g -1 (CPU). Running on GPU anyway.')
 
                 proc = _run_upscayl([], 'gpu')
                 if self.queue.should_stop():
                     return
                 if proc.returncode != 0:
                     raise RuntimeError(
-                        f'Upscayl-bin falló (code {proc.returncode}). '
-                        f'Verifica que el modelo "{job["model"]}" está instalado '
-                        f'(necesita {job["model"]}.param y {job["model"]}.bin en el '
-                        f'directorio de modelos). Revisa log: {log_path}'
+                        f'Upscayl-bin failed (code {proc.returncode}). '
+                        f'Check that model "{job["model"]}" is installed '
+                        f'(requires {job["model"]}.param and {job["model"]}.bin in the '
+                        f'models directory). Check log: {log_path}'
                     )
 
                 # Check if GPU silently produced black frames (model not installed)
@@ -364,14 +364,14 @@ class VideoProcessor:
                 if sample_pngs and self._is_black_frame(
                         os.path.join(upscaled_dir, sample_pngs[0])):
                     self._log(log_path,
-                        '⚠ GPU produjo frames negros. Causa más probable: el modelo '
-                        f'"{job["model"]}" no está instalado en el directorio de modelos. '
-                        'Verifica que existan los archivos .param y .bin correspondientes.')
+                        '⚠ GPU produced black frames. Most likely cause: model '
+                        f'"{job["model"]}" is not installed in the models directory. '
+                        'Verify that both .param and .bin files exist.')
                     raise RuntimeError(
-                        f'Los frames upscaleados están negros. '
-                        f'El modelo "{job["model"]}" probablemente no está instalado: '
-                        f'necesita {job["model"]}.param y {job["model"]}.bin. '
-                        f'Selecciona un modelo instalado en Configuración y reintenta.'
+                        f'Upscaled frames are black. '
+                        f'Model "{job["model"]}" is likely not installed: '
+                        f'requires {job["model"]}.param and {job["model"]}.bin. '
+                        f'Select an installed model in Settings and retry.'
                     )
 
             finally:
@@ -400,24 +400,24 @@ class VideoProcessor:
 
         if len(final_pngs) < total:
             raise RuntimeError(
-                f'Faltan frames upscaleados: solo {len(final_pngs)} de {total}. '
-                f'Revisa log: {log_path}'
+                f'Missing upscaled frames: only {len(final_pngs)} of {total}. '
+                f'Check log: {log_path}'
             )
 
         # ── Black-frame sanity check ──────────────────────────────────────────
         first_png = os.path.join(upscaled_dir, final_pngs[0])
         if self._is_black_frame(first_png):
             self._log(log_path,
-                f'WARNING: El primer frame upscaleado es completamente negro. '
-                f'El modelo "{job["model"]}" puede no estar instalado '
-                f'(faltan {job["model"]}.param o {job["model"]}.bin). '
-                f'Selecciona un modelo instalado en Configuración.'
+                f'WARNING: First upscaled frame is fully black. '
+                f'Model "{job["model"]}" may not be installed '
+                f'({job["model"]}.param or {job["model"]}.bin missing). '
+                f'Select an installed model in Settings.'
             )
             raise RuntimeError(
-                f'Los frames upscaleados están negros. '
-                f'El modelo "{job["model"]}" probablemente no está instalado. '
-                f'Verifica que existen {job["model"]}.param y {job["model"]}.bin '
-                f'en el directorio de modelos y selecciona un modelo válido.'
+                f'Upscaled frames are black. '
+                f'Model "{job["model"]}" is likely not installed. '
+                f'Ensure {job["model"]}.param and {job["model"]}.bin exist '
+                f'in the models directory and select a valid model.'
             )
 
         # ── Normalize to frame_000001.png … for FFmpeg ────────────────────────
@@ -428,14 +428,14 @@ class VideoProcessor:
                 os.replace(src, target)
 
         self._log(log_path, f'Upscaling done. {total} frames ready.')
-        update_job(job_id, {'stage': 'Frames upscaleados, armando video…', 'progress': 85, 'eta': 0})
+        update_job(job_id, {'stage': 'Frames upscaled, assembling video…', 'progress': 85, 'eta': 0})
 
     # ── Step 3 – Reassemble video ─────────────────────────────────────────────
 
     def _assemble_video(self, job_id: str, job: dict, frames_input_dir: str,
                         log_path: str, used_upscayl: bool,
                         process_started_at: float, base_elapsed: float):
-        update_job(job_id, {'stage': 'Armando video final', 'progress': 87})
+        update_job(job_id, {'stage': 'Assembling final video', 'progress': 87})
         self._log(log_path, '\n=== ASSEMBLE VIDEO ===')
 
         safe_model = job['model'].replace('/', '_')
@@ -451,7 +451,7 @@ class VideoProcessor:
         png_count = len(glob.glob(os.path.join(frames_input_dir, '*.png')))
         self._log(log_path, f'fps={fps}  has_audio={has_audio}  png_count={png_count}  out={out_path}')
         if png_count == 0:
-            raise RuntimeError('No hay frames disponibles para armar el video.')
+            raise RuntimeError('No frames available to assemble the video.')
 
         # ── Choose encoder: NVENC (GPU) or libx264 (CPU fallback) ────────────
         use_nvenc = config.USE_NVENC and self._nvenc_available()
@@ -485,14 +485,14 @@ class VideoProcessor:
             tmp_path = out_path.replace('.mp4', '_novid.mp4')
 
             update_job(job_id, {
-                'stage':    'Armando video final · codificando video',
+                'stage':    'Assembling final video · encoding video',
                 'progress': 90,
                 'eta':       0,
             })
             self._run_log(encode_base + [tmp_path], log_path)
 
             update_job(job_id, {
-                'stage':    'Armando video final · multiplexando audio',
+                'stage':    'Assembling final video · muxing audio',
                 'progress': 95,
                 'eta':       0,
             })
@@ -508,7 +508,7 @@ class VideoProcessor:
             os.remove(tmp_path)
         else:
             update_job(job_id, {
-                'stage':    'Armando video final · codificando video',
+                'stage':    'Assembling final video · encoding video',
                 'progress': 90,
                 'eta':       0,
             })
@@ -518,7 +518,7 @@ class VideoProcessor:
         total_elapsed = base_elapsed + max(0.0, time.time() - process_started_at)
         update_job(job_id, {
             'status':       'completed',
-            'stage':        'Completado ✓',
+            'stage':        'Completed ✓',
             'progress':     100,
             'output_path':  out_path,
             'completed_at': time.time(),

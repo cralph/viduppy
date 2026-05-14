@@ -1,4 +1,4 @@
-# VidUpscaler AI
+# Viduppy AI
 
 A web application to enhance video quality using Upscayl, an AI-powered upscaling tool.
 
@@ -92,6 +92,45 @@ If `ffmpeg` is not available on PATH, go to the app settings and enter the full 
 - The application uses a background thread to process the job queue.
 - If you encounter issues with Upscayl detection, check the paths in `config.py` or configure manually in `settings.json`.
 
+## UI Language (i18n)
+
+The app includes a language selector in **Settings**.
+
+- Built-in languages: `English` (`en`) and `Español` (`es`).
+- The selected language is saved in `localStorage` using the key `vidupscaler_lang`.
+- The language list in Settings is generated automatically from the `I18N` object keys in `templates/app.html`.
+
+### Add a new language
+
+1. Open `templates/app.html`.
+2. Find the `I18N` constant in the `<script>` section.
+3. Add a new language block (for example `fr`):
+   ```js
+   const I18N = {
+     en: { /* ... */ },
+     es: { /* ... */ },
+     fr: {
+       'active.no_job': 'Aucun job actif',
+       'queue.active_title': 'File active',
+       // add all keys used by your UI
+     },
+   };
+   ```
+4. (Optional) Add a friendly display name in `LANGUAGE_LABELS`:
+   ```js
+   const LANGUAGE_LABELS = {
+     en: 'English',
+     es: 'Español',
+     fr: 'Français',
+   };
+   ```
+5. Reload the app. The new language will appear automatically in **Settings → UI language**.
+
+### Notes for contributors
+
+- Keep translation keys consistent across all languages.
+- If a key is missing in the selected language, the app falls back to English.
+
 ## Support
 
 If you have problems, check:
@@ -99,5 +138,4 @@ If you have problems, check:
 - That Upscayl is installed and accessible.
 - That FFmpeg is installed.
 
-For more help, check the logs in the console when running `python run.py`.</content>
-<parameter name="filePath">c:\Users\cchic\OneDrive\Documents\Projects\Sides\vid-upscaler-ai\README.md
+For more help, check the logs in the console when running `python run.py`.

@@ -210,12 +210,12 @@ def api_gpu():
 @app.route('/upload', methods=['POST'])
 def upload():
     if 'video' not in request.files:
-        return jsonify({'error': 'No se envió ningún archivo'}), 400
+        return jsonify({'error': 'No file was uploaded'}), 400
 
     f   = request.files['video']
     ext = (f.filename or '').rsplit('.', 1)[-1].lower()
     if ext not in config.ALLOWED_EXTENSIONS:
-        return jsonify({'error': f'Formato .{ext} no soportado'}), 400
+        return jsonify({'error': f'Unsupported .{ext} format'}), 400
 
     job_id   = str(uuid.uuid4())
     filename = f'{job_id}.{ext}'
@@ -245,9 +245,9 @@ def create_job_route():
     target_width  = int(d.get('target_width', 0) or 0)
     target_height = int(d.get('target_height', 0) or 0)
     if output_factor <= 0:
-        return jsonify({'error': 'output_factor debe ser > 0'}), 400
+        return jsonify({'error': 'output_factor must be > 0'}), 400
     if target_width < 0 or target_height < 0:
-        return jsonify({'error': 'target_width/target_height no pueden ser negativos'}), 400
+        return jsonify({'error': 'target_width/target_height cannot be negative'}), 400
 
     create_job({
         'id':            d['job_id'],
@@ -266,7 +266,7 @@ def create_job_route():
         'target_width':  target_width,
         'target_height': target_height,
         'status':        'queued',
-        'stage':         'En cola',
+        'stage':         'Queued',
         'progress':      0,
         'created_at':    time.time(),
     })
@@ -286,7 +286,7 @@ def pause_job(job_id):
     queue.pause_job(job_id)
     update_job(job_id, {
         'status':       'paused',
-        'stage':        'Pausado',
+        'stage':        'Paused',
         'elapsed_time': round(elapsed_now, 1),
     })
     return jsonify({'ok': True})
@@ -302,7 +302,7 @@ def resume_job(job_id):
     # Reset started_at so the frontend delta is correct from this moment
     update_job(job_id, {
         'status':     'queued',
-        'stage':      'En cola (reanudado)',
+        'stage':      'Queued (resumed)',
         'started_at': time.time(),
     })
     return jsonify({'ok': True})
@@ -311,7 +311,7 @@ def resume_job(job_id):
 @app.route('/job/<job_id>/cancel', methods=['POST'])
 def cancel_job(job_id):
     queue.cancel_job(job_id)
-    update_job(job_id, {'status': 'cancelled', 'stage': 'Cancelado'})
+    update_job(job_id, {'status': 'cancelled', 'stage': 'Cancelled'})
     return jsonify({'ok': True})
 
 
@@ -321,7 +321,7 @@ def reprocess_job(job_id):
     if not job:
         return jsonify({'error': 'Not found'}), 404
     update_job(job_id, {
-        'status': 'queued', 'stage': 'En cola (reprocesar)',
+        'status': 'queued', 'stage': 'Queued (reprocess)',
         'progress': 0, 'current_frame': 0, 'frames_extracted': 0,
         'output_path': None, 'error_msg': None,
         'started_at': None, 'completed_at': None, 'eta': None,
@@ -468,11 +468,11 @@ def settings_save():
 
     errors = []
     if new_bin and not os.path.isfile(new_bin):
-        errors.append(f'Binario no encontrado: {new_bin}')
+        errors.append(f'Binary not found: {new_bin}')
     if new_models and not os.path.isdir(new_models):
-        errors.append(f'Directorio de modelos no encontrado: {new_models}')
+        errors.append(f'Models directory not found: {new_models}')
     if new_ffmpeg and not os.path.isfile(new_ffmpeg):
-        errors.append(f'FFmpeg no encontrado: {new_ffmpeg}')
+        errors.append(f'FFmpeg not found: {new_ffmpeg}')
     if errors:
         return jsonify({'ok': False, 'errors': errors}), 400
 
@@ -524,5 +524,5 @@ def settings_detect():
 if __name__ == '__main__':
     init_db()
     worker.start()
-    print(f'\n🎬  VidUpscaler corriendo en http://localhost:{config.PORT}\n')
+    print(f'\n🎬  VidUpscaler running at http://localhost:{config.PORT}\n')
     app.run(host='0.0.0.0', port=config.PORT, debug=False, threaded=True)

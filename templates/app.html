@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -118,6 +118,7 @@ button{font-family:var(--sans)}
 .filter-tabs{display:flex;gap:4px;flex-wrap:wrap}
 .filter-tab{padding:4px 11px;border-radius:20px;font-size:12px;cursor:pointer;border:1px solid var(--border);color:var(--text2);background:none;transition:all .15s;font-family:var(--sans)}
 .filter-tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.section-count{background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:2px 9px;font-size:11px;color:var(--text2);font-family:var(--mono)}
 
 /* Job Card */
 .job-card{background:var(--bg2);border:1px solid var(--border);border-radius:11px;padding:14px;margin-bottom:9px;transition:border-color .15s}
@@ -133,7 +134,10 @@ button{font-family:var(--sans)}
 .job-thumb video{width:100%;height:100%;object-fit:cover}
 .job-info{flex:1;min-width:0}
 .job-name{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.job-meta{font-size:11px;color:var(--text3);margin-top:3px;font-family:var(--mono);display:flex;flex-wrap:wrap;gap:7px}
+.job-meta-grid{margin-top:8px;display:grid;grid-template-columns:repeat(2,minmax(180px,1fr));gap:5px 12px}
+.job-meta-item{display:flex;align-items:baseline;gap:6px;min-width:0}
+.job-meta-key{font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:.6px;white-space:nowrap}
+.job-meta-val{font-size:11px;color:var(--text2);font-family:var(--mono);min-width:0;overflow-wrap:anywhere}
 .job-actions{display:flex;gap:5px;flex-shrink:0}
 .badge{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:10px;font-size:10px;font-family:var(--mono);font-weight:700;text-transform:uppercase;letter-spacing:.5px}
 .badge.queued{background:rgba(124,111,255,.15);color:var(--accent)}
@@ -206,6 +210,7 @@ button{font-family:var(--sans)}
 #uploadProgress{margin-top:10px}
 
 @media(max-width:768px){.shell{grid-template-columns:1fr}.sidebar{display:none}.stats-row{grid-template-columns:1fr 1fr}}
+@media(max-width:1000px){.job-meta-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -245,7 +250,7 @@ button{font-family:var(--sans)}
     <hr class="sidebar-divider">
     <div class="sidebar-section" style="flex:1">
       <div class="sidebar-label">Active</div>
-      <div id="activeJobSidebar" style="font-size:12px;color:var(--text3);padding:2px 10px">No active job</div>
+      <div id="activeJobSidebar" style="font-size:12px;color:var(--text3);padding:2px 10px" data-i18n="active.no_job">No active job</div>
     </div>
     <div style="padding:14px;border-top:1px solid var(--border)">
       <div style="font-size:11px;color:var(--text3)">ffmpeg + upscayl-bin</div>
@@ -373,17 +378,23 @@ button{font-family:var(--sans)}
         <div class="stat-card"><div class="stat-val" style="color:var(--accent)" id="statQueued">0</div><div class="stat-lbl">Queued</div></div>
         <div class="stat-card"><div class="stat-val" style="color:var(--green)" id="statDone">0</div><div class="stat-lbl">Completed</div></div>
       </div>
-      <div class="jobs-header">
+      <div class="jobs-header" style="margin-bottom:10px">
+        <h2 data-i18n="queue.active_title">Active Queue</h2>
+        <span class="section-count" id="activeQueueCount">0</span>
+      </div>
+      <div id="activeQueueList"></div>
+
+      <div class="jobs-header" style="margin-top:20px">
         <h2>Jobs</h2>
+        <span class="section-count" id="historyJobsCount">0</span>
         <div class="filter-tabs">
           <button class="filter-tab active" onclick="setFilter('all',this)">All</button>
-          <button class="filter-tab" onclick="setFilter('processing',this)">Active</button>
-          <button class="filter-tab" onclick="setFilter('queued',this)">Queued</button>
-          <button class="filter-tab" onclick="setFilter('completed',this)">Done</button>
+          <button class="filter-tab" onclick="setFilter('completed',this)">Completed</button>
           <button class="filter-tab" onclick="setFilter('error',this)">Error</button>
+          <button class="filter-tab" onclick="setFilter('cancelled',this)">Cancelled</button>
         </div>
       </div>
-      <div id="jobsList"></div>
+      <div id="historyJobsList"></div>
     </div>
 
     <!-- ── Panel: Settings ──────────────────────────────────────────────────── -->
@@ -486,6 +497,14 @@ button{font-family:var(--sans)}
       <div id="settingsError" style="display:none;background:rgba(255,87,87,.1);border:1px solid rgba(255,87,87,.3);border-radius:7px;padding:10px 12px;font-size:12px;color:var(--red);margin-bottom:12px"></div>
       <div id="settingsOk" style="display:none;background:rgba(74,222,128,.1);border:1px solid rgba(74,222,128,.3);border-radius:7px;padding:10px 12px;font-size:12px;color:var(--green);margin-bottom:12px">✓ Saved and applied.</div>
 
+      <div class="setting-row">
+        <label data-i18n="settings.language_label">UI language</label>
+        <select class="setting-input" id="languageSelect"></select>
+        <div id="languageHelp" style="margin-top:6px;font-size:11px;color:var(--text3)" data-i18n="settings.language_help">
+          Changes the dashboard language immediately.
+        </div>
+      </div>
+
       <div style="display:flex;gap:9px;flex-wrap:wrap">
         <button class="btn btn-primary" id="btnSave" onclick="saveSettings()">Save settings</button>
         <button class="btn btn-ghost" id="btnDetect" onclick="autoDetect()">↺ Auto-detect</button>
@@ -500,7 +519,7 @@ button{font-family:var(--sans)}
 <div class="modal-bg" id="logModal" style="display:none" onclick="if(event.target===this)closeLogModal()">
   <div class="modal" style="max-width:860px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-      <h3 style="margin:0">📋 Job Log</h3>
+      <h3 style="margin:0" data-i18n="modal.log_title">Job Log</h3>
       <button onclick="closeLogModal()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:18px">×</button>
     </div>
     <pre id="logContent" style="background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:14px;font-family:var(--mono);font-size:11px;color:var(--text2);overflow:auto;max-height:60vh;white-space:pre-wrap;word-break:break-all">(loading…)</pre>
@@ -524,6 +543,108 @@ button{font-family:var(--sans)}
 <div class="toast-container" id="toasts"></div>
 
 <script>
+// ── i18n ──────────────────────────────────────────────────────────────────────
+const I18N = {
+  en: {
+    'active.no_job': 'No active job',
+    'queue.active_title': 'Active Queue',
+    'queue.empty_active': 'No queued, paused, or processing jobs',
+    'queue.empty_history': 'No jobs found for this filter',
+    'queue.now': 'Now',
+    'jobs.no_models_detected': 'No installed models detected.',
+    'jobs.no_model_selected': 'No installed model selected',
+    'jobs.min_frames': 'Select at least 2 frames',
+    'jobs.queue_pos': 'queue',
+    'jobs.status': 'status',
+    'jobs.model': 'model',
+    'jobs.scale': 'scale',
+    'jobs.frames': 'frames',
+    'jobs.clip': 'clip',
+    'jobs.input': 'input',
+    'jobs.output': 'output',
+    'jobs.duration': 'duration',
+    'jobs.elapsed_title': 'Elapsed time',
+    'jobs.eta_title': 'Estimated time remaining',
+    'jobs.remaining': 'remaining',
+    'jobs.delete_confirm': 'Delete this job?',
+    'settings.clear_confirm': 'Clear saved configuration?',
+    'settings.language_label': 'UI language',
+    'settings.language_help': 'Changes the dashboard language immediately.',
+    'gpu.detect_error': 'Failed to detect GPU',
+    'modal.log_title': 'Job Log',
+  },
+  es: {
+    'active.no_job': 'Sin trabajo activo',
+    'queue.active_title': 'Cola activa',
+    'queue.empty_active': 'No hay trabajos en cola, pausados o procesando',
+    'queue.empty_history': 'No hay jobs para este filtro',
+    'queue.now': 'Ahora',
+    'jobs.no_models_detected': 'No se detectaron modelos instalados.',
+    'jobs.no_model_selected': 'No hay un modelo instalado seleccionado',
+    'jobs.min_frames': 'Selecciona al menos 2 frames',
+    'jobs.queue_pos': 'cola',
+    'jobs.status': 'estado',
+    'jobs.model': 'modelo',
+    'jobs.scale': 'escala',
+    'jobs.frames': 'frames',
+    'jobs.clip': 'clip',
+    'jobs.input': 'entrada',
+    'jobs.output': 'salida',
+    'jobs.duration': 'duración',
+    'jobs.elapsed_title': 'Tiempo transcurrido',
+    'jobs.eta_title': 'Tiempo restante estimado',
+    'jobs.remaining': 'restante',
+    'jobs.delete_confirm': '¿Eliminar este job?',
+    'settings.clear_confirm': '¿Limpiar configuración guardada?',
+    'settings.language_label': 'Idioma de la interfaz',
+    'settings.language_help': 'Cambia el idioma del panel inmediatamente.',
+    'gpu.detect_error': 'No se pudo detectar la GPU',
+    'modal.log_title': 'Log del job',
+  },
+};
+const LANGUAGE_LABELS = {
+  en: 'English',
+  es: 'Español',
+};
+const LANG = localStorage.getItem('vidupscaler_lang') || 'en';
+
+function t(key, vars = {}) {
+  const dict = I18N[LANG] || I18N.en;
+  let out = dict[key] || I18N.en[key] || key;
+  for (const [name, value] of Object.entries(vars)) out = out.replaceAll(`{${name}}`, String(value));
+  return out;
+}
+
+function applyI18n() {
+  document.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = t(el.dataset.i18n); });
+}
+applyI18n();
+window.setAppLanguage = function(lang) {
+  localStorage.setItem('vidupscaler_lang', lang);
+  location.reload();
+};
+
+function getLanguageLabel(code) {
+  return LANGUAGE_LABELS[code] || code.toUpperCase();
+}
+
+function renderLanguageSelector() {
+  const sel = document.getElementById('languageSelect');
+  if (!sel) return;
+  const languages = Object.keys(I18N).sort();
+  sel.innerHTML = languages.map((code) =>
+    `<option value="${code}">${getLanguageLabel(code)}</option>`
+  ).join('');
+  sel.value = languages.includes(LANG) ? LANG : 'en';
+}
+
+document.addEventListener('change', (e) => {
+  if (e.target && e.target.id === 'languageSelect') {
+    const next = String(e.target.value || '').trim();
+    if (next && next !== LANG) window.setAppLanguage(next);
+  }
+});
+
 // ── State ─────────────────────────────────────────────────────────────────────
 let videoData    = null;
 let selectedScale = 2;
@@ -531,6 +652,8 @@ let selectedModel = null;
 let models        = [];
 let allJobs       = [];
 let currentFilter = 'all';
+let liveQueueIds  = [];
+let activeJobId   = null;
 let rangeStartPct = 0;
 let rangeEndPct   = 1;
 let outputJobId   = null;
@@ -541,6 +664,8 @@ let targetHeight  = 0;
 // ── Clock ─────────────────────────────────────────────────────────────────────
 setInterval(() => {
   document.getElementById('clockEl').textContent = new Date().toLocaleTimeString();
+  refreshLiveTimers();
+  updateSidebar(activeJobId);
 }, 1000);
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
@@ -569,7 +694,7 @@ async function loadModels() {
     models = Array.isArray(d.models) ? d.models : [];
     if (!models.length) {
       document.getElementById('modelGrid').innerHTML =
-        `<div style="font-size:12px;color:var(--red)">No hay modelos instalados detectados.</div>`;
+        `<div style="font-size:12px;color:var(--red)">${t('jobs.no_models_detected')}</div>`;
       selectedModel = null;
       return;
     }
@@ -783,10 +908,10 @@ function resetUpload() {
 // ── Submit job ────────────────────────────────────────────────────────────────
 async function submitJob() {
   if (!videoData) return;
-  if (!selectedModel) { toast('No hay modelo instalado seleccionado', 'error'); return; }
+  if (!selectedModel) { toast(t('jobs.no_model_selected'), 'error'); return; }
   const fStart = Math.floor(rangeStartPct * videoData.total_frames);
   const fEnd   = Math.round(rangeEndPct   * videoData.total_frames);
-  if (fEnd - fStart < 2) { toast('Select at least 2 frames', 'error'); return; }
+  if (fEnd - fStart < 2) { toast(t('jobs.min_frames'), 'error'); return; }
 
   const btn = document.getElementById('submitBtn');
   btn.disabled = true; btn.textContent = 'Queuing…';
@@ -829,7 +954,10 @@ async function submitJob() {
   const es = new EventSource('/events');
   es.onmessage = (e) => {
     const data = JSON.parse(e.data);
-    allJobs = data.jobs || [];
+    const now = Date.now() / 1000;
+    allJobs = (data.jobs || []).map((j) => ({ ...j, _eta_snapshot_at: now }));
+    liveQueueIds = Array.isArray(data.queue) ? data.queue : [];
+    activeJobId = data.active || null;
     renderQueue();
     updateStats();
     updateSidebar(data.active);
@@ -855,24 +983,176 @@ function inferStageKey(job) {
   return 'queued';
 }
 
-function renderQueue() {
-  const list = document.getElementById('jobsList');
-  let jobs = allJobs;
-  if (currentFilter !== 'all') jobs = jobs.filter(j => j.status === currentFilter);
-  if (!jobs.length) {
-    list.innerHTML = `<div class="empty-state">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-      <p>No jobs found</p></div>`;
-    return;
-  }
-  list.innerHTML = jobs.map(renderJobCard).join('');
-
-  const qCount = allJobs.filter(j => j.status === 'queued').length;
-  document.getElementById('queueBadge').textContent = qCount;
-  document.getElementById('queueBadge').style.display = qCount > 0 ? '' : 'none';
+function jobRenderSignature(job, opts = {}) {
+  return JSON.stringify([
+    opts.queuePos || '',
+    job.id,
+    job.original_name,
+    job.status,
+    job.stage,
+    job.progress,
+    job.current_frame,
+    job.frames_to_process,
+    job.error_msg,
+    job.model,
+    job.scale,
+    job.start_frame,
+    job.end_frame,
+    job.width,
+    job.height,
+    job.duration,
+    job.target_width,
+    job.target_height,
+    job.output_factor,
+    job.eta,
+    job.elapsed_time,
+    job.started_at,
+    job.completed_at,
+    job.created_at,
+  ]);
 }
 
-function renderJobCard(job) {
+function htmlToElement(html) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html.trim();
+  return tpl.content.firstElementChild;
+}
+
+function syncJobCards(containerEl, items, emptyHtml) {
+  if (!items.length) {
+    if (containerEl.dataset.state !== 'empty' || containerEl.innerHTML !== emptyHtml) {
+      containerEl.innerHTML = emptyHtml;
+      containerEl.dataset.state = 'empty';
+    }
+    return;
+  }
+  containerEl.dataset.state = 'cards';
+  containerEl.querySelectorAll('.empty-state').forEach((node) => node.remove());
+
+  const wanted = new Set(items.map((it) => `jc-${it.job.id}`));
+  containerEl.querySelectorAll('.job-card').forEach((node) => {
+    if (!wanted.has(node.id)) node.remove();
+  });
+
+  for (const it of items) {
+    const cardId = `jc-${it.job.id}`;
+    let node = containerEl.querySelector(`[id="${cardId}"]`);
+    const sig = jobRenderSignature(it.job, it.opts || {});
+    if (!node || node.dataset.sig !== sig) {
+      const fresh = htmlToElement(renderJobCard(it.job, it.opts || {}));
+      fresh.dataset.sig = sig;
+      if (node) {
+        node.replaceWith(fresh);
+      }
+      node = fresh;
+    }
+    containerEl.appendChild(node);
+  }
+}
+
+function renderQueue() {
+  const activeListEl = document.getElementById('activeQueueList');
+  const historyListEl = document.getElementById('historyJobsList');
+  const activeCountEl = document.getElementById('activeQueueCount');
+  const historyCountEl = document.getElementById('historyJobsCount');
+
+  const jobMap = Object.fromEntries(allJobs.map(j => [j.id, j]));
+  const activeStatuses = new Set(['queued', 'processing', 'paused']);
+  const historyStatuses = new Set(['completed', 'error', 'cancelled']);
+
+  const activeJobs = [];
+  const addedIds = new Set();
+  const activeJob = activeJobId ? jobMap[activeJobId] : null;
+  if (activeJob && activeJob.status === 'processing') {
+    activeJobs.push(activeJob);
+    addedIds.add(activeJob.id);
+  }
+
+  for (const jid of liveQueueIds) {
+    const job = jobMap[jid];
+    if (!job || !activeStatuses.has(job.status) || addedIds.has(jid)) continue;
+    activeJobs.push(job);
+    addedIds.add(jid);
+  }
+
+  for (const job of allJobs) {
+    if (!activeStatuses.has(job.status) || addedIds.has(job.id)) continue;
+    activeJobs.push(job);
+    addedIds.add(job.id);
+  }
+
+  if (!activeJobs.length) {
+    syncJobCards(activeListEl, [], `<div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+      <p>${t('queue.empty_active')}</p></div>`);
+  } else {
+    syncJobCards(
+      activeListEl,
+      activeJobs.map((job, index) => ({ job, opts: { queuePos: queuePositionFor(job, index) } })),
+      '',
+    );
+  }
+  activeCountEl.textContent = String(activeJobs.length);
+
+  let historyJobs = allJobs.filter(j => historyStatuses.has(j.status));
+  if (currentFilter !== 'all') historyJobs = historyJobs.filter(j => j.status === currentFilter);
+
+  if (!historyJobs.length) {
+    syncJobCards(historyListEl, [], `<div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+      <p>${t('queue.empty_history')}</p></div>`);
+  } else {
+    syncJobCards(
+      historyListEl,
+      historyJobs.map((job) => ({ job, opts: {} })),
+      '',
+    );
+  }
+  historyCountEl.textContent = String(historyJobs.length);
+
+  const qCount = activeJobs.length;
+  document.getElementById('queueBadge').textContent = qCount;
+  document.getElementById('queueBadge').style.display = qCount > 0 ? '' : 'none';
+  refreshLiveTimers();
+}
+
+function queuePositionFor(job, fallbackIndex) {
+  if (job.status === 'processing') return t('queue.now');
+  const idx = liveQueueIds.indexOf(job.id);
+  if (idx >= 0) return `#${idx + 1}`;
+  return `#${fallbackIndex + 1}`;
+}
+
+function resolveOutputResolution(job) {
+  const srcW = parseInt(job.width || 0, 10) || 0;
+  const srcH = parseInt(job.height || 0, 10) || 0;
+  const scale = parseFloat(job.scale || 1) || 1;
+  const baseW = Math.max(0, Math.round(srcW * scale));
+  const baseH = Math.max(0, Math.round(srcH * scale));
+
+  let outW = parseInt(job.target_width || 0, 10) || 0;
+  let outH = parseInt(job.target_height || 0, 10) || 0;
+  const factor = parseFloat(job.output_factor || 1) || 1;
+
+  const even = (n) => Math.max(2, Math.round(n / 2) * 2);
+
+  if (outW > 0 && outH > 0) return { w: outW, h: outH };
+  if (outW > 0 && outH <= 0 && baseW > 0 && baseH > 0) {
+    outH = even((baseH * outW) / baseW);
+    return { w: outW, h: outH };
+  }
+  if (outH > 0 && outW <= 0 && baseW > 0 && baseH > 0) {
+    outW = even((baseW * outH) / baseH);
+    return { w: outW, h: outH };
+  }
+  if (Math.abs(factor - 1) > 1e-6 && baseW > 0 && baseH > 0) {
+    return { w: even(baseW * factor), h: even(baseH * factor) };
+  }
+  if (baseW > 0 && baseH > 0) return { w: baseW, h: baseH };
+  return null;
+}
+
+function renderJobCard(job, opts = {}) {
   const sk  = inferStageKey(job);
   const si  = STAGE_KEYS.indexOf(sk);
   const pct = Math.round(job.progress || 0);
@@ -884,21 +1164,20 @@ function renderJobCard(job) {
     return `<div class="${cls}" title="${STAGE_LABELS[k]}"></div>`;
   }).join('');
 
-  const eta = job.eta > 0
-    ? `<span class="eta-badge">${fmtETA(job.eta)}</span>` : '';
-
   const actions = [];
   if (job.status === 'completed') {
     actions.push(`<button class="icon-btn success" title="Preview" onclick="previewOutput('${job.id}')">▶</button>`);
     actions.push(`<button class="icon-btn" title="Download" onclick="location.href='/output/${job.id}'">↓</button>`);
     actions.push(`<button class="icon-btn" title="Reprocess" onclick="jobAct('${job.id}','reprocess')">↺</button>`);
-    actions.push(`<button class="icon-btn" title="Ver log" onclick="viewLog('${job.id}')">📋</button>`);
+    actions.push(`<button class="icon-btn" title="View log" onclick="viewLog('${job.id}')">📋</button>`);
   }
   if (job.status === 'processing') {
     actions.push(`<button class="icon-btn warn" title="Pause" onclick="jobAct('${job.id}','pause')">⏸</button>`);
     actions.push(`<button class="icon-btn danger" title="Cancel" onclick="jobAct('${job.id}','cancel')">✕</button>`);
   }
   if (job.status === 'paused') {
+    actions.push(`<button class="icon-btn" title="Move up" onclick="movePriority('${job.id}','up')">↑</button>`);
+    actions.push(`<button class="icon-btn" title="Move down" onclick="movePriority('${job.id}','down')">↓</button>`);
     actions.push(`<button class="icon-btn success" title="Resume" onclick="jobAct('${job.id}','resume')">▶</button>`);
     actions.push(`<button class="icon-btn danger" title="Cancel" onclick="jobAct('${job.id}','cancel')">✕</button>`);
   }
@@ -910,7 +1189,7 @@ function renderJobCard(job) {
   }
   if (['error','cancelled'].includes(job.status)) {
     actions.push(`<button class="icon-btn" title="Reprocess" onclick="jobAct('${job.id}','reprocess')">↺</button>`);
-    actions.push(`<button class="icon-btn" title="Ver log" onclick="viewLog('${job.id}')">📋</button>`);
+    actions.push(`<button class="icon-btn" title="View log" onclick="viewLog('${job.id}')">📋</button>`);
   }
   actions.push(`<button class="icon-btn danger" title="Delete" onclick="jobAct('${job.id}','delete')">🗑</button>`);
 
@@ -921,11 +1200,13 @@ function renderJobCard(job) {
     ? Math.max(0, (job.end_frame - job.start_frame) / job.fps)
     : 0;
   const videoDur = parseFloat(job.duration || 0);
-  const outputHint = job.target_width > 0 || job.target_height > 0
-    ? `${job.target_width || '?'}×${job.target_height || '?'}`
-    : (Math.abs((parseFloat(job.output_factor || 1) || 1) - 1) > 1e-6
-      ? `f×${(parseFloat(job.output_factor || 1) || 1).toFixed(2)}`
-      : 'native');
+  const outputRes = resolveOutputResolution(job);
+  const outputHint = outputRes
+    ? `${outputRes.w}×${outputRes.h}`
+    : '—';
+  const queueMeta = opts.queuePos
+    ? `<div class="job-meta-item"><span class="job-meta-key">${t('jobs.queue_pos')}</span><span class="job-meta-val">${opts.queuePos}</span></div>`
+    : '';
   const createdStr = job.created_at
     ? new Date(job.created_at * 1000).toLocaleString() : '';
 
@@ -934,6 +1215,7 @@ function renderJobCard(job) {
     ? Math.min(100, (job.current_frame || 0) / (job.frames_to_process || 1) * 100)
     : 0;
   const elapsed      = getElapsed(job);
+  const liveEta      = getLiveEta(job);
 
   const showProgress = ['processing','queued','paused'].includes(job.status);
   const progressHtml = showProgress ? `
@@ -948,7 +1230,7 @@ function renderJobCard(job) {
       ${isUpscaling ? `
       <div style="margin-top:8px;padding:8px 11px;background:var(--bg3);border:1px solid var(--border);border-radius:7px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
-          <span style="font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:1px">Frames upscaleados</span>
+          <span style="font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:1px">Upscaled frames</span>
           <span style="font-family:var(--mono);font-size:16px;font-weight:700;color:var(--teal)">${framePct.toFixed(1)}%</span>
         </div>
         <div style="display:flex;align-items:center;gap:10px">
@@ -960,8 +1242,8 @@ function renderJobCard(job) {
       </div>` : ''}
 
       <div style="display:flex;gap:14px;margin-top:6px;font-family:var(--mono);font-size:10px;color:var(--text3);flex-wrap:wrap;align-items:center">
-        ${elapsed > 1 ? `<span title="Tiempo transcurrido">⏱ ${fmtElapsed(elapsed)}</span>` : ''}
-        ${job.eta > 0  ? `<span title="Tiempo estimado restante">🏁 ${fmtETA(job.eta)} restante</span>` : ''}
+        <span class="live-elapsed" data-job-id="${job.id}" title="${t('jobs.elapsed_title')}" ${elapsed > 1 ? '' : 'style="display:none"'}>${elapsed > 1 ? `⏱ ${fmtElapsed(elapsed)}` : ''}</span>
+        <span class="live-eta" data-job-id="${job.id}" title="${t('jobs.eta_title')}" ${liveEta > 0 ? '' : 'style="display:none"'}>${liveEta > 0 ? `🏁 ${fmtETA(liveEta)} ${t('jobs.remaining')}` : ''}</span>
       </div>
     </div>` : '';
 
@@ -974,7 +1256,7 @@ function renderJobCard(job) {
   const completedInfo = job.status === 'completed' ? `
     <div style="margin-top:8px;padding:8px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:7px;font-family:var(--mono);font-size:11px;color:var(--text2);display:flex;gap:14px;flex-wrap:wrap">
       <span>frames ${fmtFrames(completedFrames)}</span>
-      <span>tiempo ${fmtElapsed(elapsed)}</span>
+      <span>time ${fmtElapsed(elapsed)}</span>
     </div>
   ` : '';
 
@@ -986,11 +1268,16 @@ function renderJobCard(job) {
       </div>
       <div class="job-info">
         <div class="job-name">${job.original_name}</div>
-        <div class="job-meta">
-          <span>×${job.scale}</span><span>${job.model}</span>
-          <span>${frameRange}</span><span>${job.width||'?'}×${job.height||'?'}</span>
-          <span>clip ${fmtClock(clipSec)}</span><span>video ${fmtClock(videoDur)}</span>
-          <span>out ${outputHint}</span>
+        <div class="job-meta-grid">
+          <div class="job-meta-item"><span class="job-meta-key">${t('jobs.status')}</span><span class="job-meta-val">${job.status}</span></div>
+          ${queueMeta}
+          <div class="job-meta-item"><span class="job-meta-key">${t('jobs.model')}</span><span class="job-meta-val">${job.model}</span></div>
+          <div class="job-meta-item"><span class="job-meta-key">${t('jobs.scale')}</span><span class="job-meta-val">×${job.scale}</span></div>
+          <div class="job-meta-item"><span class="job-meta-key">${t('jobs.frames')}</span><span class="job-meta-val">${frameRange}</span></div>
+          <div class="job-meta-item"><span class="job-meta-key">${t('jobs.clip')}</span><span class="job-meta-val">${fmtClock(clipSec)}</span></div>
+          <div class="job-meta-item"><span class="job-meta-key">${t('jobs.input')}</span><span class="job-meta-val">${job.width||'?'}×${job.height||'?'}</span></div>
+          <div class="job-meta-item"><span class="job-meta-key">${t('jobs.output')}</span><span class="job-meta-val">${outputHint}</span></div>
+          <div class="job-meta-item"><span class="job-meta-key">${t('jobs.duration')}</span><span class="job-meta-val">${fmtClock(videoDur)}</span></div>
         </div>
       </div>
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px">
@@ -1031,7 +1318,7 @@ function updateSidebar(activeId) {
   } else {
     dot.classList.add('idle');
     sText.textContent = 'Idle';
-    sEl.textContent   = 'No active job';
+    sEl.textContent   = t('active.no_job');
     topEl.textContent = '';
   }
 }
@@ -1045,7 +1332,7 @@ function setFilter(f, el) {
 
 // ── Job actions ───────────────────────────────────────────────────────────────
 async function jobAct(id, action) {
-  if (action === 'delete' && !confirm('Delete this job?')) return;
+  if (action === 'delete' && !confirm(t('jobs.delete_confirm'))) return;
   await fetch(`/job/${id}/${action}`, { method: 'POST' });
   toast({ pause:'Paused', resume:'Resumed ▶', cancel:'Cancelled', reprocess:'Re-queued ↺', delete:'Deleted' }[action] || action, 'info');
 }
@@ -1089,6 +1376,8 @@ function closeLogModal() {
 // ── Settings UI ───────────────────────────────────────────────────────────────
 async function loadSettingsUI() {
   try {
+    applyI18n();
+    renderLanguageSelector();
     const r = await fetch('/settings/detect', { method: 'POST' });
     const d = await r.json();
 
@@ -1180,7 +1469,7 @@ async function saveSettings() {
 }
 
 function clearSettings() {
-  if (!confirm('Clear saved configuration?')) return;
+  if (!confirm(t('settings.clear_confirm'))) return;
   document.getElementById('inp-bin').value    = '';
   document.getElementById('inp-models').value = '';
   document.getElementById('inp-ffmpeg').value = '';
@@ -1227,6 +1516,46 @@ function getElapsed(job) {
   return base;
 }
 
+function getLiveEta(job) {
+  const etaBase = Math.max(0, parseInt(job.eta || 0, 10) || 0);
+  if (etaBase <= 0) return 0;
+  const snapshotAt = parseFloat(job._eta_snapshot_at || 0) || 0;
+  if (snapshotAt <= 0) return etaBase;
+  const age = Math.max(0, (Date.now() / 1000) - snapshotAt);
+  return Math.max(0, Math.round(etaBase - age));
+}
+
+function refreshLiveTimers() {
+  if (!allJobs.length) return;
+  const jobMap = Object.fromEntries(allJobs.map((j) => [j.id, j]));
+
+  document.querySelectorAll('.live-elapsed').forEach((el) => {
+    const job = jobMap[el.dataset.jobId];
+    if (!job) return;
+    const elapsed = getElapsed(job);
+    if (elapsed > 1) {
+      el.style.display = '';
+      el.textContent = `⏱ ${fmtElapsed(elapsed)}`;
+    } else {
+      el.style.display = 'none';
+      el.textContent = '';
+    }
+  });
+
+  document.querySelectorAll('.live-eta').forEach((el) => {
+    const job = jobMap[el.dataset.jobId];
+    if (!job) return;
+    const eta = getLiveEta(job);
+    if (eta > 0 && ['processing', 'queued', 'paused'].includes(job.status)) {
+      el.style.display = '';
+      el.textContent = `🏁 ${fmtETA(eta)} ${t('jobs.remaining')}`;
+    } else {
+      el.style.display = 'none';
+      el.textContent = '';
+    }
+  });
+}
+
 /** Formats elapsed seconds as "1m 04s", "2h 03m", etc. */
 function fmtElapsed(sec) {
   if (!sec || sec < 1) return '0s';
@@ -1259,9 +1588,9 @@ async function detectGPU() {
     // Update NVENC status
     const statusEl = document.getElementById('nvencStatus');
     if (nvencAvailable) {
-      statusEl.innerHTML = '<span style="color:var(--green)">✓ NVENC disponible</span> — h264_nvenc detectado';
+      statusEl.innerHTML = '<span style="color:var(--green)">✓ NVENC available</span> — h264_nvenc detected';
     } else {
-      statusEl.innerHTML = '<span style="color:var(--text3)">NVENC no disponible</span> — se usará libx264 (CPU)';
+      statusEl.innerHTML = '<span style="color:var(--text3)">NVENC not available</span> — using libx264 (CPU)';
     }
 
     // Update toggle
@@ -1281,9 +1610,9 @@ async function detectGPU() {
       list.innerHTML = `<div class="scale-btn active" data-gpuid="0" onclick="selectGPU(0,this)">GPU 0 (default)</div>`;
     }
 
-    toast(nvencAvailable ? 'NVENC detectado ✓' : 'NVENC no disponible — se usará CPU', nvencAvailable ? 'success' : 'info');
+    toast(nvencAvailable ? 'NVENC detected ✓' : 'NVENC not available — CPU will be used', nvencAvailable ? 'success' : 'info');
   } catch(e) {
-    toast('Error al detectar GPU', 'error');
+    toast(t('gpu.detect_error'), 'error');
   }
   btn.textContent = '↺ Scan';
 }
@@ -1334,7 +1663,7 @@ function toggleForceCPU() {
 
 function toggleNvenc() {
   if (!nvencAvailable) {
-    toast('NVENC no disponible en este sistema. Haz clic en ↺ Scan primero.', 'error');
+    toast('NVENC is not available on this system. Click ↺ Scan first.', 'error');
     return;
   }
   _applyNvencToggle(!nvencEnabled);
