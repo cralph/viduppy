@@ -173,14 +173,20 @@ button{font-family:var(--sans)}
 .badge.cancelled,.badge.paused{background:rgba(90,90,114,.2);color:var(--text3)}
 .badge.paused{background:rgba(255,181,71,.12);color:var(--amber)}
 
-/* Stage steps */
+/* Stage progress */
 .stage-line{margin-top:9px}
 .stage-label{display:flex;justify-content:space-between;font-size:11px;color:var(--text2);margin-bottom:3px;font-family:var(--mono)}
-.stage-steps{display:flex;gap:3px;margin-bottom:5px}
-.stage-step{flex:1;height:3px;border-radius:2px;background:var(--bg3)}
-.stage-step.done-step{background:var(--green)}
-.stage-step.current-step{background:var(--accent);position:relative;overflow:hidden}
-.stage-step.current-step::after{content:'';position:absolute;top:0;left:-100%;width:100%;height:100%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.4),transparent);animation:shimmer 1.5s infinite}
+.stage-flow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:8px}
+.stage-node{min-width:0}
+.stage-node-label{display:block;font-size:9px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stage-node.current .stage-node-label{color:var(--text2)}
+.stage-node.done .stage-node-label{color:var(--green)}
+.stage-node-bar{height:4px;background:var(--bg3);border-radius:4px;overflow:hidden}
+.stage-node-fill{height:100%;width:0%;background:var(--accent);border-radius:4px;transition:width .4s ease}
+.stage-node.done .stage-node-fill{background:var(--green)}
+.stage-node.current .stage-node-fill{background:var(--accent)}
+.pbar-wrap.step-current{height:5px;background:var(--bg4);border-radius:4px}
+.step-detail{display:flex;align-items:center;justify-content:space-between;margin-top:7px;font-family:var(--mono);font-size:10px;color:var(--text3)}
 @keyframes shimmer{to{left:100%}}
 
 /* Icon buttons */
@@ -1273,21 +1279,61 @@ async function submitJob() {
 })();
 
 // ── Queue rendering ───────────────────────────────────────────────────────────
-const STAGE_KEYS = ['queued','extracting','upscaling','assembling','done'];
+const STAGE_FLOW = ['extracting', 'upscaling', 'assembling', 'done'];
 const STAGE_LABELS = {
-  queued: 'Queued', extracting: 'Extracting frames',
-  upscaling: 'Upscaling', assembling: 'Assembling', done: 'Done'
+  queued: 'En cola',
+  extracting: 'Extracción',
+  upscaling: 'Upscale',
+  assembling: 'Ensamblado',
+  done: 'Listo',
 };
+
+function _stripStagePrefix(stageText) {
+  let s = String(stageText || '').trim();
+  s = s.replace(/^paused at\s+/i, '');
+  s = s.replace(/^cancelled at\s+/i, '');
+  s = s.replace(/^error at\s+/i, '');
+  return s;
+}
 
 function inferStageKey(job) {
   if (job.status === 'completed') return 'done';
-  if (['error','cancelled'].includes(job.status)) return 'queued';
-  const s = (job.stage || '').toLowerCase();
-  if (s.includes('extray') || s.includes('extract')) return 'extracting';
-  if (s.includes('upscale') || s.includes('upscayle')) return 'upscaling';
-  if (s.includes('armando') || s.includes('assembl')) return 'assembling';
-  if (job.status === 'processing') return 'extracting';
+  const base = _stripStagePrefix(job.stage).toLowerCase();
+  if (base.includes('extray') || base.includes('extract')) return 'extracting';
+  if (base.includes('upscale') || base.includes('upscayle')) return 'upscaling';
+  if (base.includes('armando') || base.includes('assembl')) return 'assembling';
+  const progress = Math.max(0, Math.min(100, Number(job.progress || 0)));
+  if (progress >= 85) return 'assembling';
+  if (progress >= 12) return 'upscaling';
+  if (progress > 0 || job.status === 'processing') return 'extracting';
   return 'queued';
+}
+
+function _pctFromRange(progress, start, end) {
+  const p = Math.max(0, Math.min(100, Number(progress || 0)));
+  const span = Math.max(1e-6, end - start);
+  return Math.max(0, Math.min(100, ((p - start) / span) * 100));
+}
+
+function stepProgressPercent(job, stageKey) {
+  const progress = Math.max(0, Math.min(100, Number(job.progress || 0)));
+  if (stageKey === 'done') return 100;
+  if (stageKey === 'extracting') {
+    const total = Number(job.frames_to_process || 0);
+    const done = Number(job.frames_extracted || 0);
+    if (total > 0) return Math.max(0, Math.min(100, (done / total) * 100));
+    return _pctFromRange(progress, 0, 12);
+  }
+  if (stageKey === 'upscaling') {
+    const total = Number(job.frames_to_process || 0);
+    const done = Number(job.current_frame || 0);
+    if (total > 0) return Math.max(0, Math.min(100, (done / total) * 100));
+    return _pctFromRange(progress, 12, 85);
+  }
+  if (stageKey === 'assembling') {
+    return _pctFromRange(progress, 85, 100);
+  }
+  return 0;
 }
 
 function jobRenderSignature(job, opts = {}) {
@@ -1466,15 +1512,10 @@ function resolveOutputResolution(job) {
 
 function renderJobCard(job, opts = {}) {
   const sk  = inferStageKey(job);
-  const si  = STAGE_KEYS.indexOf(sk);
   const pct = Math.round(job.progress || 0);
-
-  const stepsHtml = STAGE_KEYS.map((k, i) => {
-    let cls = 'stage-step';
-    if (i < si) cls += ' done-step';
-    else if (i === si && job.status === 'processing') cls += ' current-step';
-    return `<div class="${cls}" title="${STAGE_LABELS[k]}"></div>`;
-  }).join('');
+  const stepPctRaw = stepProgressPercent(job, sk);
+  const stepPct = Math.max(0, Math.min(100, stepPctRaw));
+  const flowIdx = STAGE_FLOW.indexOf(sk);
 
   const actions = [];
   if (job.status === 'completed') {
@@ -1522,37 +1563,44 @@ function renderJobCard(job, opts = {}) {
   const createdStr = job.created_at
     ? new Date(job.created_at * 1000).toLocaleString() : '';
 
-  const isUpscaling  = sk === 'upscaling' && (job.frames_to_process > 0);
-  const framePct     = isUpscaling
-    ? Math.min(100, (job.current_frame || 0) / (job.frames_to_process || 1) * 100)
-    : 0;
   const elapsed      = getElapsed(job);
   const totalElapsed = elapsed > 0 ? fmtElapsed(elapsed) : '0s';
   const liveEta      = getLiveEta(job);
+  const stepLabel = STAGE_LABELS[sk] || STAGE_LABELS.queued;
+  const stageText = job.stage || stepLabel;
+  const currentBarColor = job.status === 'error'
+    ? 'var(--red)'
+    : (job.status === 'paused'
+      ? 'var(--amber)'
+      : (job.status === 'cancelled' ? 'var(--text3)' : 'var(--teal)'));
 
-  const showProgress = ['processing','queued','paused'].includes(job.status);
+  const flowHtml = STAGE_FLOW.map((k, i) => {
+    const label = STAGE_LABELS[k];
+    const isDone = i < flowIdx || (job.status === 'completed' && k === 'done');
+    const isCurrent = i === flowIdx && !isDone;
+    const fill = isDone ? 100 : (isCurrent ? stepPct : 0);
+    const fillColor = isDone ? 'var(--green)' : (isCurrent ? currentBarColor : 'var(--accent)');
+    const cls = `stage-node${isDone ? ' done' : ''}${isCurrent ? ' current' : ''}`;
+    return `<div class="${cls}" title="${label}">
+      <span class="stage-node-label">${label}</span>
+      <div class="stage-node-bar"><div class="stage-node-fill" style="width:${fill.toFixed(1)}%;background:${fillColor}"></div></div>
+    </div>`;
+  }).join('');
+
+  const showProgress = ['processing', 'queued', 'paused', 'error', 'cancelled', 'completed'].includes(job.status);
   const progressHtml = showProgress ? `
     <div class="stage-line">
       <div class="stage-label">
-        <span>${job.stage || STAGE_LABELS[sk]}</span>
+        <span>${stageText}</span>
         <span style="font-family:var(--mono);font-size:12px;font-weight:700">${pct}%</span>
       </div>
-      <div class="stage-steps">${stepsHtml}</div>
+      <div class="stage-flow">${flowHtml}</div>
       <div class="pbar-wrap"><div class="pbar" style="width:${pct}%"></div></div>
-
-      ${isUpscaling ? `
-      <div style="margin-top:8px;padding:8px 11px;background:var(--bg3);border:1px solid var(--border);border-radius:7px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
-          <span style="font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:1px">Upscaled frames</span>
-          <span style="font-family:var(--mono);font-size:16px;font-weight:700;color:var(--teal)">${framePct.toFixed(1)}%</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:10px">
-          <div style="flex:1;height:5px;background:var(--bg4);border-radius:3px;overflow:hidden">
-            <div style="height:100%;width:${framePct}%;background:var(--teal);border-radius:3px;transition:width .5s ease"></div>
-          </div>
-          <span style="font-family:var(--mono);font-size:11px;color:var(--text2);white-space:nowrap">${fmtFrames(job.current_frame||0)} / ${fmtFrames(job.frames_to_process||0)}</span>
-        </div>
-      </div>` : ''}
+      <div class="step-detail">
+        <span>Paso actual: ${stepLabel}</span>
+        <span style="color:${currentBarColor};font-weight:700">${stepPct.toFixed(1)}%</span>
+      </div>
+      <div class="pbar-wrap step-current"><div class="pbar" style="width:${stepPct.toFixed(1)}%;background:${currentBarColor}"></div></div>
 
       <div style="display:flex;gap:14px;margin-top:6px;font-family:var(--mono);font-size:10px;color:var(--text3);flex-wrap:wrap;align-items:center">
         <span class="live-elapsed" data-job-id="${job.id}" title="${t('jobs.elapsed_title')}" ${elapsed > 1 ? '' : 'style="display:none"'}>${elapsed > 1 ? `⏱ ${fmtElapsed(elapsed)}` : ''}</span>

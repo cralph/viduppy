@@ -29,12 +29,17 @@ class VideoProcessor:
                     self._process(job_id)
                 except Exception as exc:
                     job = get_job(job_id) or {}
+                    # If user requested pause/cancel, avoid converting that interruption
+                    # into a hard error status.
+                    if self.queue.is_cancelled(job_id) or (job.get('status') in ('paused', 'cancelled')):
+                        continue
+                    stage_at_error = job.get('stage') or 'processing'
                     prev_elapsed = float(job.get('elapsed_time', 0) or 0)
                     started_at = float(job.get('started_at', 0) or 0)
                     elapsed_total = prev_elapsed + (time.time() - started_at if started_at else 0)
                     update_job(job_id, {
                         'status': 'error',
-                        'stage': f'Error: {exc}',
+                        'stage': f'Error at {stage_at_error}',
                         'error_msg': str(exc),
                         'elapsed_time': round(elapsed_total, 1),
                         'completed_at': time.time(),
@@ -287,6 +292,9 @@ class VideoProcessor:
                     upscayl_factor=upscayl_factor,
                 )
 
+        if self.queue.should_stop():
+            return
+
         # ── Normalize and sanitize output frame set ───────────────────────────
         # Some upscayl-bin builds can emit extra variant/tile-like PNGs.
         # Keep exactly one candidate per frame index, then rebuild a clean
@@ -296,6 +304,8 @@ class VideoProcessor:
         ignored_pngs = 0
         with os.scandir(upscaled_dir) as scan:
             for entry in scan:
+                if self.queue.should_stop():
+                    return
                 if not (entry.is_file() and entry.name.endswith('.png') and not entry.name.startswith('._')):
                     continue
                 m = _re.match(r'^frame_(\d+)', entry.name)
@@ -314,6 +324,8 @@ class VideoProcessor:
 
         missing = [i for i in range(1, total + 1) if i not in frame_candidates]
         if missing:
+            if self.queue.should_stop():
+                return
             sample = ', '.join(str(i) for i in missing[:12])
             raise RuntimeError(
                 f'Missing upscaled frames after normalization ({len(missing)} missing). '
@@ -342,6 +354,8 @@ class VideoProcessor:
         os.makedirs(normalized_dir, exist_ok=True)
         try:
             for idx, src in chosen_paths:
+                if self.queue.should_stop():
+                    return
                 dst = os.path.join(normalized_dir, f'frame_{idx:06d}.png')
                 shutil.copy2(src, dst)
 
@@ -369,11 +383,15 @@ class VideoProcessor:
 
             # Rebuild clean set in upscaled_dir.
             for path in glob.glob(os.path.join(upscaled_dir, '*.png')):
+                if self.queue.should_stop():
+                    return
                 try:
                     os.remove(path)
                 except OSError:
                     pass
             for fname in normalized_pngs:
+                if self.queue.should_stop():
+                    return
                 self._replace_with_retry(
                     os.path.join(normalized_dir, fname),
                     os.path.join(upscaled_dir, fname),

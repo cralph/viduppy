@@ -352,6 +352,7 @@ def create_job_route():
 @app.route('/job/<job_id>/pause', methods=['POST'])
 def pause_job(job_id):
     job = get_job(job_id)
+    prev_stage = (job or {}).get('stage') or 'Processing'
     # Accumulate elapsed time so the timer survives pause/resume cycles
     prev_elapsed = float((job or {}).get('elapsed_time', 0) or 0)
     started_at   = float((job or {}).get('started_at',   0) or 0)
@@ -359,7 +360,7 @@ def pause_job(job_id):
     queue.pause_job(job_id)
     update_job(job_id, {
         'status':       'paused',
-        'stage':        'Paused',
+        'stage':        f'Paused at {prev_stage}',
         'elapsed_time': round(elapsed_now, 1),
     })
     return jsonify({'ok': True})
@@ -384,13 +385,14 @@ def resume_job(job_id):
 @app.route('/job/<job_id>/cancel', methods=['POST'])
 def cancel_job(job_id):
     job = get_job(job_id)
+    prev_stage = (job or {}).get('stage') or 'Processing'
     prev_elapsed = float((job or {}).get('elapsed_time', 0) or 0)
     started_at   = float((job or {}).get('started_at',   0) or 0)
     elapsed_now  = prev_elapsed + (time.time() - started_at if started_at else 0)
     queue.cancel_job(job_id)
     update_job(job_id, {
         'status':       'cancelled',
-        'stage':        'Cancelled',
+        'stage':        f'Cancelled at {prev_stage}',
         'elapsed_time': round(elapsed_now, 1),
         'completed_at': time.time(),
         'eta':          0,
