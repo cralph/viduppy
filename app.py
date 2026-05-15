@@ -24,6 +24,9 @@ app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024 * 1024  # 20 GB
 queue   = QueueManager()
 proc    = VideoProcessor(queue)
 worker  = threading.Thread(target=proc.run, daemon=True)
+_worker_lock = threading.Lock()
+_runtime_lock = threading.Lock()
+_runtime_ready = False
 FRAME_PREVIEW_DIR = os.path.join(config.OUTPUT_FOLDER, 'frame_previews')
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -102,11 +105,42 @@ def _is_safe_uploaded_path(filepath: str) -> bool:
         return False
 
 
+def ensure_worker_running() -> bool:
+    """
+    Ensure the background queue worker thread is alive.
+    Returns True when a thread was started/restarted in this call.
+    """
+    global worker
+    with _worker_lock:
+        if worker.is_alive():
+            return False
+        if worker.ident is not None:
+            # A Python thread object cannot be started twice.
+            worker = threading.Thread(target=proc.run, daemon=True)
+        worker.start()
+        return True
+
+
+def ensure_runtime_ready():
+    """Ensure DB schema exists and worker thread is running."""
+    global _runtime_ready
+    with _runtime_lock:
+        if not _runtime_ready:
+            init_db()
+            _runtime_ready = True
+    ensure_worker_running()
+
+
 # ── Pages ─────────────────────────────────────────────────────────────────────
 
 @app.route('/')
 def index():
     return render_template('app.html')
+
+
+@app.before_request
+def _ensure_runtime_for_requests():
+    ensure_runtime_ready()
 
 
 # Legacy redirects (keep old URLs working)
@@ -736,7 +770,6 @@ def settings_detect():
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
-    init_db()
-    worker.start()
+    ensure_runtime_ready()
     print(f'\n🎬  VidUpscaler running at http://localhost:{config.PORT}\n')
     app.run(host='0.0.0.0', port=config.PORT, debug=False, threaded=True)

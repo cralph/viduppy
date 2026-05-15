@@ -2,13 +2,11 @@
 Entry point for VidUpscaler.
 Run with: python run.py
 """
-from database import init_db
-from app import app, worker, config
+from app import app, ensure_runtime_ready, config
 
 
 if __name__ == '__main__':
-    init_db()
-    worker.start()
+    ensure_runtime_ready()
     print(f'\nVidUpscaler running at http://localhost:{config.PORT}')
     print(f'   Upscayl binary : {config.UPSCAYL_BIN or "NOT FOUND - open Settings"}')
     print(f'   Models dir     : {config.UPSCAYL_MODELS_DIR or "NOT FOUND - open Settings"}')
