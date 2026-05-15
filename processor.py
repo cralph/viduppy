@@ -243,10 +243,10 @@ class VideoProcessor:
         }
         needed = [f for f in all_frame_names if f not in upscaled_done]
 
-        # On Windows, prefer correctness over resume-cache reuse:
-        # previous corrupted PNGs can be reused and keep producing mosaic output.
-        # Rebuild the upscaled set from scratch.
-        if os.name == 'nt' and upscaled_done:
+        # Optional Windows safe mode: prefer correctness over resume-cache reuse.
+        # Previous corrupted PNGs can be reused and keep producing mosaic output.
+        # Rebuild the upscaled set from scratch only when safe mode is enabled.
+        if os.name == 'nt' and config.WINDOWS_SAFE_MODE and upscaled_done:
             self._log(
                 log_path,
                 'Windows safe mode: ignoring cached upscaled PNGs and rebuilding frame set from scratch.',
@@ -261,10 +261,10 @@ class VideoProcessor:
         if not needed:
             self._log(log_path, 'All frames already upscaled, skipping upscayl-bin.')
         else:
-            # Windows-safe mode: process each frame independently.
+            # Optional Windows-safe mode: process each frame independently.
             # Some upscayl-bin Windows builds can produce tile-mixed outputs in
             # directory batch mode; per-frame mode is slower but stable.
-            if os.name == 'nt':
+            if os.name == 'nt' and config.WINDOWS_SAFE_MODE:
                 self._upscale_frames_serial_windows(
                     job_id=job_id,
                     job=job,

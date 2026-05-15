@@ -581,6 +581,20 @@ button{font-family:var(--sans)}
           </label>
         </div>
 
+        <!-- Windows safe mode toggle -->
+        <div style="display:flex;align-items:center;justify-content:space-between;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 13px;margin-bottom:10px">
+          <div>
+            <div style="font-size:12px;font-weight:500">Windows safe mode <span style="font-family:var(--mono);font-size:10px;color:var(--amber)">per-frame</span></div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px">Windows only. Processes one frame at a time for stability. Use only if batch mode causes glitches/crashes.</div>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <span style="font-size:11px;color:var(--text3)" id="safeModeToggleLabel">OFF</span>
+            <div id="safeModeToggle" onclick="toggleWindowsSafeMode()" style="width:36px;height:20px;border-radius:10px;background:var(--bg4);border:1px solid var(--border);cursor:pointer;position:relative;transition:background .2s">
+              <div id="safeModeKnob" style="position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--text3);transition:all .2s"></div>
+            </div>
+          </label>
+        </div>
+
         <!-- GPU device selector -->
         <div id="gpuDeviceWrap">
           <div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-bottom:6px">GPU DEVICE (Vulkan index for upscayl-bin)</div>
@@ -1861,6 +1875,7 @@ let nvencEnabled = false;
 let selectedGPU  = 0;
 let nvencAvailable = false;
 let forceCPU = false;
+let windowsSafeMode = false;
 
 async function detectGPU() {
   const btn = document.getElementById('btnDetectGPU');
@@ -1873,6 +1888,8 @@ async function detectGPU() {
     selectedGPU    = d.gpu_device || 0;
     if (d.force_cpu) { if (!forceCPU) toggleForceCPU(); }
     else             { if (forceCPU)  toggleForceCPU(); }
+    if (d.windows_safe_mode) { if (!windowsSafeMode) toggleWindowsSafeMode(); }
+    else                     { if (windowsSafeMode)  toggleWindowsSafeMode(); }
 
     // Update NVENC status
     const statusEl = document.getElementById('nvencStatus');
@@ -1950,6 +1967,28 @@ function toggleForceCPU() {
   }
 }
 
+function toggleWindowsSafeMode() {
+  windowsSafeMode = !windowsSafeMode;
+  const toggle = document.getElementById('safeModeToggle');
+  const knob   = document.getElementById('safeModeKnob');
+  const label  = document.getElementById('safeModeToggleLabel');
+  if (windowsSafeMode) {
+    toggle.style.background = 'var(--amber)';
+    toggle.style.borderColor = 'var(--amber)';
+    knob.style.left = '18px';
+    knob.style.background = '#fff';
+    label.textContent = 'ON';
+    label.style.color = 'var(--amber)';
+  } else {
+    toggle.style.background = 'var(--bg4)';
+    toggle.style.borderColor = 'var(--border)';
+    knob.style.left = '2px';
+    knob.style.background = 'var(--text3)';
+    label.textContent = 'OFF';
+    label.style.color = 'var(--text3)';
+  }
+}
+
 function toggleNvenc() {
   if (!nvencAvailable) {
     toast('NVENC is not available on this system. Click ↺ Scan first.', 'error');
@@ -1986,6 +2025,7 @@ saveSettings = async function() {
         use_nvenc:          nvencEnabled,
         gpu_device:         selectedGPU,
         force_cpu:          forceCPU,
+        windows_safe_mode:  windowsSafeMode,
       }),
     });
     const d = await r.json();

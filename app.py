@@ -274,6 +274,7 @@ def api_gpu():
         'use_nvenc':       config.USE_NVENC,
         'gpu_device':      config.GPU_DEVICE,
         'force_cpu':       config.FORCE_CPU,
+        'windows_safe_mode': config.WINDOWS_SAFE_MODE,
     })
 
 
@@ -713,6 +714,7 @@ def settings_save():
     use_nvenc    = bool(d.get('use_nvenc', False))
     gpu_device   = int(d.get('gpu_device', 0))
     force_cpu    = bool(d.get('force_cpu', False))
+    windows_safe_mode = bool(d.get('windows_safe_mode', False))
 
     errors = []
     if new_bin and not os.path.isfile(new_bin):
@@ -739,6 +741,7 @@ def settings_save():
         'use_nvenc':          use_nvenc,
         'gpu_device':         gpu_device,
         'force_cpu':          force_cpu,
+        'windows_safe_mode':  windows_safe_mode,
     })
     config.reload()
     return jsonify({
@@ -749,6 +752,7 @@ def settings_save():
         'use_nvenc':        config.USE_NVENC,
         'gpu_device':       config.GPU_DEVICE,
         'force_cpu':        config.FORCE_CPU,
+        'windows_safe_mode': config.WINDOWS_SAFE_MODE,
     })
 
 

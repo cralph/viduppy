@@ -254,7 +254,7 @@ def save_settings(data: dict):
 
 def reload():
     """Re-apply settings from disk into this module's globals."""
-    global UPSCAYL_BIN, UPSCAYL_MODELS_DIR, USE_NVENC, GPU_DEVICE, FORCE_CPU, FFMPEG_BIN, FFPROBE_BIN
+    global UPSCAYL_BIN, UPSCAYL_MODELS_DIR, USE_NVENC, GPU_DEVICE, FORCE_CPU, WINDOWS_SAFE_MODE, FFMPEG_BIN, FFPROBE_BIN
     s = load_settings()
     UPSCAYL_BIN        = _existing_file_or_empty(s.get('upscayl_bin', '')) or _autodetect_bin()
     UPSCAYL_MODELS_DIR = _existing_dir_or_empty(s.get('upscayl_models_dir', '')) or _autodetect_models()
@@ -263,6 +263,7 @@ def reload():
     USE_NVENC          = bool(s.get('use_nvenc', False))
     GPU_DEVICE         = int(s.get('gpu_device', 0))
     FORCE_CPU          = bool(s.get('force_cpu', False))
+    WINDOWS_SAFE_MODE  = bool(s.get('windows_safe_mode', False))
 
 # Initial load
 _settings = load_settings()
@@ -273,6 +274,7 @@ FFPROBE_BIN        = _existing_file_or_empty(_settings.get('ffprobe_bin', '')) o
 USE_NVENC          = bool(_settings.get('use_nvenc', False))
 GPU_DEVICE         = int(_settings.get('gpu_device', 0))
 FORCE_CPU          = bool(_settings.get('force_cpu', False))
+WINDOWS_SAFE_MODE  = bool(_settings.get('windows_safe_mode', False))
 
 # ── Available models ───────────────────────────────────────────────────────────
 UPSCAYL_MODELS = [
